@@ -2,6 +2,19 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 export const THEMES = {
+  highContrast: {
+    name: 'High Contrast (Yellow/Cyan)',
+    bg: 0x090b10,
+    frontColor: 0xffea00,
+    backColor: 0x00f0ff,
+    valleyColor: 0x3b82f6,
+    mountainColor: 0xef4444,
+    boundaryColor: 0xffffff,
+    cutColor: 0xf97316,
+    flatColor: 0x64748b,
+    unassignedColor: 0xa855f7,
+    gridColor: 0x1e293b
+  },
   cardboard: {
     name: 'Cardboard Craft',
     bg: 0x0f1219,
@@ -59,7 +72,7 @@ export const THEMES = {
 export class FoldRenderer {
   constructor(container) {
     this.container = container;
-    this.currentTheme = THEMES.cardboard;
+    this.currentTheme = THEMES.highContrast;
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(this.currentTheme.bg);
