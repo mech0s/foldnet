@@ -20,7 +20,7 @@ class App {
   }
 
   async loadDefaultModel() {
-    await this.loadModelFromUrl('models/notched-cube.json');
+    await this.loadModelFromUrl('models/subdivided-notched-cube.json');
   }
 
   async loadModelFromUrl(url) {
