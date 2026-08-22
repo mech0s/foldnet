@@ -80,9 +80,8 @@ export class NetEditor {
         const key = `${Math.min(v1, v2)}-${Math.max(v1, v2)}`;
 
         if (!edgeMap.has(key)) {
-          const edgeIdx = edges_vertices.length;
           edges_vertices.push([Math.min(v1, v2), Math.max(v1, v2)]);
-          edgeMap.set(key, { edgeIdx, count: 1 });
+          edgeMap.set(key, { count: 1 });
         } else {
           edgeMap.get(key).count += 1;
         }
