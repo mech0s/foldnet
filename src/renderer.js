@@ -216,8 +216,29 @@ export class FoldRenderer {
         positions[i * 3 + 2] = c[2];
       });
 
+      // Compute bounding box of face in 2D net coordinates for UV mapping
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      faceVerts.forEach(vIdx => {
+        const c = origCoords[vIdx];
+        if (c[0] < minX) minX = c[0];
+        if (c[0] > maxX) maxX = c[0];
+        if (c[1] < minY) minY = c[1];
+        if (c[1] > maxY) maxY = c[1];
+      });
+      const width = Math.max(maxX - minX, 1e-4);
+      const height = Math.max(maxY - minY, 1e-4);
+
+      // UV coordinates (0..1)
+      const uvs = new Float32Array(faceVerts.length * 2);
+      faceVerts.forEach((vIdx, i) => {
+        const c = origCoords[vIdx];
+        uvs[i * 2 + 0] = (c[0] - minX) / width;
+        uvs[i * 2 + 1] = (c[1] - minY) / height;
+      });
+
       const geometryFront = new THREE.BufferGeometry();
       geometryFront.setAttribute('position', new THREE.BufferAttribute(positions.slice(), 3));
+      geometryFront.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
       geometryFront.setIndex(indices);
       geometryFront.computeVertexNormals();
 
@@ -256,7 +277,8 @@ export class FoldRenderer {
         backMesh,
         faceVerts,
         geometryFront,
-        geometryBack
+        geometryBack,
+        faceBounds: { minX, maxX, minY, maxY, width, height }
       });
     });
 
@@ -265,6 +287,138 @@ export class FoldRenderer {
 
     // Center and set camera
     this.centerModel();
+  }
+
+  /**
+   * Updates face textures from Graphic Studio SVG artwork layers
+   */
+  updateFaceArtworks(faceArtworks) {
+    if (!this.faceMeshes || this.faceMeshes.length === 0) return;
+
+    this.faceMeshes.forEach((meshItem, fIdx) => {
+      const artworks = faceArtworks ? (faceArtworks.get(fIdx) || []) : [];
+      const frontMesh = meshItem.frontMesh;
+
+      if (artworks.length === 0) {
+        if (frontMesh.material.map) {
+          frontMesh.material.map.dispose();
+          frontMesh.material.map = null;
+        }
+        frontMesh.material.color.setHex(this.currentTheme.frontColor);
+        frontMesh.material.needsUpdate = true;
+        return;
+      }
+
+      // Create high-res canvas texture for this face
+      const canvas = document.createElement('canvas');
+      canvas.width = 512;
+      canvas.height = 512;
+      const ctx = canvas.getContext('2d');
+
+      // Base background color
+      const bgHex = '#' + this.currentTheme.frontColor.toString(16).padStart(6, '0');
+      ctx.fillStyle = bgHex;
+      ctx.fillRect(0, 0, 512, 512);
+
+      // Render artwork items onto canvas
+      artworks.forEach(item => {
+        ctx.save();
+        if (item.type === 'rect') {
+          // Normalize relative to face bounds
+          ctx.fillStyle = item.fill || 'transparent';
+          ctx.strokeStyle = item.stroke || 'transparent';
+          ctx.lineWidth = (item.strokeWidth || 1) * 3;
+
+          const rx = ((item.x + 50) / 100) * 512;
+          const ry = ((item.y + 50) / 100) * 512;
+          const rw = (item.width / 100) * 512;
+          const rh = (item.height / 100) * 512;
+
+          if (item.fill && item.fill !== 'transparent') ctx.fillRect(rx, ry, rw, rh);
+          if (item.stroke && item.stroke !== 'none') ctx.strokeRect(rx, ry, rw, rh);
+        } else if (item.type === 'circle') {
+          ctx.fillStyle = item.fill || 'transparent';
+          ctx.strokeStyle = item.stroke || 'transparent';
+          ctx.lineWidth = (item.strokeWidth || 1) * 3;
+
+          const cx = ((item.cx + 50) / 100) * 512;
+          const cy = ((item.cy + 50) / 100) * 512;
+          const r = (item.r / 100) * 512;
+
+          ctx.beginPath();
+          ctx.arc(cx, cy, r, 0, Math.PI * 2);
+          if (item.fill && item.fill !== 'transparent') ctx.fill();
+          if (item.stroke && item.stroke !== 'none') ctx.stroke();
+        } else if (item.type === 'text') {
+          ctx.fillStyle = item.fill || '#ffffff';
+          const fontSize = ((item.fontSize || 24) / 100) * 512;
+          ctx.font = `bold ${fontSize}px sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+
+          const tx = ((item.x + 50) / 100) * 512;
+          const ty = ((item.y + 50) / 100) * 512;
+          ctx.fillText(item.text, tx, ty);
+        } else if (item.type === 'stamp') {
+          const sx = ((item.x + 50) / 100) * 512;
+          const sy = ((item.y + 50) / 100) * 512;
+
+          if (item.stampType === 'fragile') {
+            ctx.fillStyle = '#ef4444';
+            ctx.fillRect(sx, sy, 240, 140);
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 36px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('FRAGILE', sx + 120, sy + 80);
+          } else if (item.stampType === 'up') {
+            ctx.fillStyle = '#3b82f6';
+            ctx.fillRect(sx, sy, 160, 200);
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.moveTo(sx + 80, sy + 40);
+            ctx.lineTo(sx + 40, sy + 100);
+            ctx.lineTo(sx + 65, sy + 100);
+            ctx.lineTo(sx + 65, sy + 160);
+            ctx.lineTo(sx + 95, sy + 160);
+            ctx.lineTo(sx + 95, sy + 100);
+            ctx.lineTo(sx + 120, sy + 100);
+            ctx.closePath();
+            ctx.fill();
+          } else if (item.stampType === 'recycle') {
+            ctx.fillStyle = '#10b981';
+            ctx.beginPath();
+            ctx.arc(sx + 100, sy + 100, 90, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#ffffff';
+            ctx.font = '72px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('♻', sx + 100, sy + 100);
+          } else if (item.stampType === 'barcode') {
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(sx, sy, 260, 140);
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(sx + 20, sy + 20, 12, 100);
+            ctx.fillRect(sx + 45, sy + 20, 6, 100);
+            ctx.fillRect(sx + 65, sy + 20, 18, 100);
+            ctx.fillRect(sx + 100, sy + 20, 8, 100);
+            ctx.fillRect(sx + 125, sy + 20, 16, 100);
+            ctx.fillRect(sx + 160, sy + 20, 24, 100);
+            ctx.fillRect(sx + 200, sy + 20, 10, 100);
+            ctx.fillRect(sx + 225, sy + 20, 14, 100);
+          }
+        }
+        ctx.restore();
+      });
+
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.needsUpdate = true;
+
+      frontMesh.material.map = texture;
+      frontMesh.material.color.setHex(0xffffff);
+      frontMesh.material.needsUpdate = true;
+    });
   }
 
   buildCreaseLines() {

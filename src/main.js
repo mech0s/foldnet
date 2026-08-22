@@ -4,6 +4,7 @@ import { FoldRenderer } from './renderer.js';
 import { NetEditor } from './netEditor.js';
 import { CADParser } from './cadParser.js';
 import { NetUnfolder } from './netUnfolder.js';
+import { GraphicStudio } from './graphicStudio.js';
 
 class App {
   constructor() {
@@ -25,15 +26,35 @@ class App {
     this.isPreviewPlaying = false;
     this.previewDirection = 1;
 
+    // Graphic Studio state
+    this.graphicStudio = null;
+
     // Seeded CAD Generation State
     this.currentCadPlanarData = null;
     this.currentCadSeed = 1;
 
     this.initNetEditor();
+    this.initGraphicStudio();
     this.discoverModels();
     this.bindUIEvents();
     this.loadDefaultModel();
     this.startAnimationLoop();
+  }
+
+  initGraphicStudio() {
+    const studioContainer = document.getElementById('studio-workspace');
+    if (!studioContainer) return;
+
+    this.graphicStudio = new GraphicStudio(studioContainer, {
+      onTextureUpdate: (artworks) => {
+        if (this.renderer) {
+          this.renderer.updateFaceArtworks(artworks);
+        }
+        if (this.previewRenderer) {
+          this.previewRenderer.updateFaceArtworks(artworks);
+        }
+      }
+    });
   }
 
   discoverModels() {
@@ -181,6 +202,11 @@ class App {
       if (this.netEditor) {
         this.netEditor.loadFoldJSON(jsonData);
       }
+
+      // Also update Graphic Studio if available
+      if (this.graphicStudio) {
+        this.graphicStudio.loadModel(this.foldData, this.kinematics, this.currentCadPlanarData ? this.currentCadPlanarData.dualGraph : null);
+      }
     } catch (err) {
       console.error('Error initializing FOLD model:', err);
       alert(`Error parsing FOLD file: ${err.message}`);
@@ -272,25 +298,36 @@ class App {
     // Mode Switcher Tabs
     const btnMode3D = document.getElementById('btn-mode-3d');
     const btnModeEditor = document.getElementById('btn-mode-editor');
+    const btnModeStudio = document.getElementById('btn-mode-studio');
     const viewerWorkspace = document.getElementById('viewer-workspace');
     const editorWorkspace = document.getElementById('editor-workspace');
+    const studioWorkspace = document.getElementById('studio-workspace');
 
-    btnMode3D.addEventListener('click', () => {
-      btnMode3D.classList.add('active');
-      btnModeEditor.classList.remove('active');
-      viewerWorkspace.classList.add('active');
-      editorWorkspace.classList.remove('active');
-      this.renderer.resize();
-    });
+    const switchWorkspace = (activeBtn, activeWorkspace) => {
+      [btnMode3D, btnModeEditor, btnModeStudio].forEach(b => {
+        if (b) b.classList.toggle('active', b === activeBtn);
+      });
+      [viewerWorkspace, editorWorkspace, studioWorkspace].forEach(w => {
+        if (w) w.classList.toggle('active', w === activeWorkspace);
+      });
+      this.onWindowResize();
+    };
 
+    btnMode3D.addEventListener('click', () => switchWorkspace(btnMode3D, viewerWorkspace));
     btnModeEditor.addEventListener('click', () => {
-      btnModeEditor.classList.add('active');
-      btnMode3D.classList.remove('active');
-      editorWorkspace.classList.add('active');
-      viewerWorkspace.classList.remove('active');
+      switchWorkspace(btnModeEditor, editorWorkspace);
       if (this.netEditor) this.netEditor.resizeCanvas();
       if (this.previewRenderer) this.previewRenderer.resize();
     });
+    if (btnModeStudio) {
+      btnModeStudio.addEventListener('click', () => {
+        switchWorkspace(btnModeStudio, studioWorkspace);
+        if (this.graphicStudio) {
+          this.graphicStudio.updateClusterView();
+          this.graphicStudio.updateNavigator();
+        }
+      });
+    }
 
     // Slider event
     const slider = document.getElementById('fold-slider');

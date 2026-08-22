@@ -7,8 +7,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <script type="module" crossorigin src="/assets/index-XMVjUyxe.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-DxdYJ6fE.css">
+  <script type="module" crossorigin src="/assets/index-kZwbMa5C.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-akM2wSjA.css">
 </head>
 <body>
   <div id="app">
@@ -41,6 +41,15 @@
             </svg>
             <span>Net Prep & Editor</span>
           </button>
+          <button id="btn-mode-studio" class="mode-tab" title="Graphic Studio (Neighbor Cluster Painting)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 19l7-7 3 3-7 7-3-3z"></path>
+              <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"></path>
+              <path d="M2 2l7.586 7.586"></path>
+              <circle cx="11" cy="11" r="2"></circle>
+            </svg>
+            <span>Graphic Studio</span>
+          </button>
         </div>
       </div>
 
@@ -65,6 +74,14 @@
           <span>Open File</span>
           <input type="file" id="file-input" accept=".json,.fold,.obj,.stl,.step,.stp" hidden />
         </label>
+
+        <button id="btn-regen-cad" class="btn btn-secondary btn-regen-cad" style="display: none;" title="Regenerate Net layout using next pseudo-random seed">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="23 4 23 10 17 10"></polyline>
+            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+          </svg>
+          <span id="btn-regen-label">Re-gen Net (Seed #1)</span>
+        </button>
 
         <div class="control-group">
           <label for="theme-select">Theme:</label>
@@ -192,6 +209,9 @@
               <span>📥 Import CAD</span>
               <input type="file" id="cad-file-input" accept=".obj,.stl,.step,.stp" hidden />
             </label>
+            <button id="btn-editor-regen-cad" class="btn btn-secondary btn-regen-cad" style="display: none;" title="Regenerate Net layout using next pseudo-random seed">
+              <span id="btn-editor-regen-label">🎲 Re-gen Net (Seed #1)</span>
+            </button>
           </div>
 
           <div class="toolbar-divider"></div>
@@ -261,6 +281,9 @@
           </aside>
         </div>
       </div>
+
+      <!-- Graphic Studio (Neighbor Cluster Painting) Workspace -->
+      <div id="studio-workspace" class="workspace-panel"></div>
     </main>
 
     <!-- Side Inspector Panel -->
