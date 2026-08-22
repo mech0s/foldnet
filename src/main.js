@@ -24,13 +24,83 @@ class App {
     this.previewDirection = 1;
 
     this.initNetEditor();
+    this.discoverModels();
     this.bindUIEvents();
     this.loadDefaultModel();
     this.startAnimationLoop();
   }
 
+  discoverModels() {
+    const modelSelect = document.getElementById('model-select');
+    if (!modelSelect) return;
+
+    try {
+      // Dynamically discover all JSON files in models/ folder
+      const globModules = import.meta.glob('../models/*.json', { eager: true });
+      const discovered = [];
+
+      for (const path in globModules) {
+        const filename = path.split('/').pop();
+        const mod = globModules[path];
+        const data = mod.default || mod;
+
+        if (data && typeof data === 'object') {
+          const title = data.file_title || data.title || filename.replace('.json', '');
+          const facesCount = Array.isArray(data.faces_vertices) ? data.faces_vertices.length : null;
+
+          discovered.push({
+            url: `models/${filename}`,
+            filename,
+            title,
+            facesCount
+          });
+        }
+      }
+
+      // Sort alphabetically by filename
+      discovered.sort((a, b) => a.filename.localeCompare(b.filename));
+
+      // Rebuild model dropdown options
+      modelSelect.innerHTML = '';
+      let defaultSelectedUrl = 'models/subdivided-notched-cube.json';
+
+      discovered.forEach(m => {
+        const opt = document.createElement('option');
+        opt.value = m.url;
+        const faceBadge = m.facesCount ? ` (${m.facesCount} Faces)` : '';
+        
+        const nameWithoutExt = m.filename.replace(/\.json$/i, '');
+        const titleClean = m.title.toLowerCase().replace(/[^a-z0-9]+/g, '');
+        const nameClean = nameWithoutExt.toLowerCase().replace(/[^a-z0-9]+/g, '');
+
+        if (titleClean === nameClean) {
+          opt.textContent = `${m.filename}${faceBadge}`;
+        } else {
+          opt.textContent = `${m.filename} — ${m.title}${faceBadge}`;
+        }
+
+        if (m.filename === 'subdivided-notched-cube.json' || m.filename.includes('subdivided-notched')) {
+          opt.selected = true;
+          defaultSelectedUrl = m.url;
+        }
+        modelSelect.appendChild(opt);
+      });
+
+      // Add Custom File option
+      const customOpt = document.createElement('option');
+      customOpt.value = 'custom';
+      customOpt.textContent = 'Custom File...';
+      modelSelect.appendChild(customOpt);
+
+      this.defaultModelUrl = defaultSelectedUrl;
+    } catch (err) {
+      console.warn('Dynamic model discovery warning:', err);
+    }
+  }
+
   async loadDefaultModel() {
-    await this.loadModelFromUrl('models/subdivided-notched-cube.json');
+    const url = this.defaultModelUrl || 'models/subdivided-notched-cube.json';
+    await this.loadModelFromUrl(url);
   }
 
   async loadModelFromUrl(url) {
