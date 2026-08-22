@@ -25,6 +25,22 @@
           <h1>FOLDNet</h1>
           <span class="version-tag">FOLD 1.1 Spec</span>
         </div>
+
+        <div class="mode-switcher">
+          <button id="btn-mode-3d" class="mode-tab active" title="3D Animated Folding Viewer">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+            </svg>
+            <span>3D Fold Viewer</span>
+          </button>
+          <button id="btn-mode-editor" class="mode-tab" title="2D Net Preparation & FOLD Editor">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 20h9"></path>
+              <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+            </svg>
+            <span>Net Prep & Editor</span>
+          </button>
+        </div>
       </div>
 
       <div class="top-controls">
@@ -76,68 +92,171 @@
 
     <!-- Main Viewport Area -->
     <main class="viewport-container">
-      <div id="canvas-container"></div>
+      <!-- 3D Viewer Workspace -->
+      <div id="viewer-workspace" class="workspace-panel active">
+        <div id="canvas-container"></div>
 
-      <!-- State Overlay Badge -->
-      <div class="state-badge" id="state-badge">
-        <span class="status-dot"></span>
-        <span id="state-text">FLAT 2D NET</span>
-      </div>
-
-      <!-- Drag and Drop Overlay -->
-      <div id="drop-zone" class="drop-zone">
-        <div class="drop-message">
-          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-            <polyline points="17 8 12 3 7 8"></polyline>
-            <line x1="12" y1="3" x2="12" y2="15"></line>
-          </svg>
-          <h3>Drop FOLD file here to render</h3>
-          <p>Supports .json and .fold formats</p>
+        <!-- State Overlay Badge -->
+        <div class="state-badge" id="state-badge">
+          <span class="status-dot"></span>
+          <span id="state-text">FLAT 2D NET</span>
         </div>
+
+        <!-- Drag and Drop Overlay -->
+        <div id="drop-zone" class="drop-zone">
+          <div class="drop-message">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="17 8 12 3 7 8"></polyline>
+              <line x1="12" y1="3" x2="12" y2="15"></line>
+            </svg>
+            <h3>Drop FOLD file here to render</h3>
+            <p>Supports .json and .fold formats</p>
+          </div>
+        </div>
+
+        <!-- Legend Overlay -->
+        <div class="legend-panel">
+          <div class="legend-item"><span class="legend-color valley"></span> Valley Fold (V)</div>
+          <div class="legend-item"><span class="legend-color mountain"></span> Mountain Fold (M)</div>
+          <div class="legend-item"><span class="legend-color boundary"></span> Boundary (B)</div>
+          <div class="legend-item"><span class="legend-color cut"></span> Cut / Slit (C)</div>
+          <div class="legend-item"><span class="legend-color flat"></span> Flat Crease (F)</div>
+          <div class="legend-item"><span class="legend-color unassigned"></span> Unassigned (U)</div>
+        </div>
+
+        <!-- Floating Bottom Slider & Controls Bar -->
+        <footer class="slider-control-bar">
+          <div class="playback-controls">
+            <button id="btn-play-pause" class="btn btn-primary btn-round" title="Play/Pause Folding Animation">
+              <svg id="play-icon" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                <polygon points="5 3 19 12 5 21 5 3"></polygon>
+              </svg>
+              <svg id="pause-icon" width="18" height="18" viewBox="0 0 24 24" fill="currentColor" style="display:none;">
+                <rect x="6" y="4" width="4" height="16"></rect>
+                <rect x="14" y="4" width="4" height="16"></rect>
+              </svg>
+            </button>
+
+            <select id="speed-select" class="custom-select speed-select" title="Animation Speed">
+              <option value="0.5">0.5x</option>
+              <option value="1" selected>1.0x</option>
+              <option value="2">2.0x</option>
+            </select>
+          </div>
+
+          <div class="slider-wrapper">
+            <span class="slider-label">Flat</span>
+            <div class="slider-container">
+              <input type="range" id="fold-slider" min="0" max="100" step="0.1" value="0" />
+              <div class="slider-progress" id="slider-progress"></div>
+            </div>
+            <span class="slider-label">Box</span>
+            <div class="slider-value-display" id="slider-value">0%</div>
+          </div>
+        </footer>
       </div>
 
-      <!-- Legend Overlay -->
-      <div class="legend-panel">
-        <div class="legend-item"><span class="legend-color valley"></span> Valley Fold (V)</div>
-        <div class="legend-item"><span class="legend-color mountain"></span> Mountain Fold (M)</div>
-        <div class="legend-item"><span class="legend-color boundary"></span> Boundary (B)</div>
-        <div class="legend-item"><span class="legend-color cut"></span> Cut / Slit (C)</div>
-        <div class="legend-item"><span class="legend-color flat"></span> Flat Crease (F)</div>
-        <div class="legend-item"><span class="legend-color unassigned"></span> Unassigned (U)</div>
+      <!-- Net Preparation & Editor Workspace -->
+      <div id="editor-workspace" class="workspace-panel">
+        <div class="editor-toolbar">
+          <div class="toolbar-section">
+            <span class="toolbar-label">Paint Edge:</span>
+            <div class="directive-palette">
+              <button class="palette-btn valley active" data-directive="V" title="Valley Fold (+90°)">Valley (V)</button>
+              <button class="palette-btn mountain" data-directive="M" title="Mountain Fold (-90°)">Mountain (M)</button>
+              <button class="palette-btn boundary" data-directive="B" title="Boundary Outer Edge">Boundary (B)</button>
+              <button class="palette-btn cut" data-directive="C" title="Cut / Internal Slit">Cut (C)</button>
+              <button class="palette-btn flat" data-directive="F" title="Flat Crease (0°)">Flat (F)</button>
+              <button class="palette-btn unassigned" data-directive="U" title="Unassigned">Unassigned (U)</button>
+            </div>
+          </div>
+
+          <div class="toolbar-divider"></div>
+
+          <div class="toolbar-section">
+            <button id="btn-attach-face" class="btn btn-secondary" title="Attach quad face outward on selected edge">
+              <span>➕ Attach Face</span>
+            </button>
+            <button id="btn-auto-boundary" class="btn btn-secondary" title="Auto-detect outer perimeter edges as Boundary (B)">
+              <span>🪄 Auto-Boundary</span>
+            </button>
+            <button id="btn-invert-folds" class="btn btn-secondary" title="Invert Mountain & Valley folds (M ↔ V)">
+              <span>🔄 Invert Folds</span>
+            </button>
+            <button id="btn-center-net" class="btn btn-secondary" title="Center 2D Net view">
+              <span>🎯 Center View</span>
+            </button>
+          </div>
+
+          <div class="toolbar-divider"></div>
+
+          <div class="toolbar-section right">
+            <button id="btn-toggle-preview" class="btn btn-secondary active" title="Toggle Pop-Out Live 3D Preview Sidebar">
+              <span>👁️ 3D Preview</span>
+            </button>
+            <button id="btn-toggle-code" class="btn btn-secondary" title="Toggle Live FOLD JSON Code Panel">
+              <span>{ } JSON Code</span>
+            </button>
+            <button id="btn-send-to-3d" class="btn btn-primary" title="Test Fold in Full 3D Viewer">
+              <span>🚀 Open in 3D Viewer</span>
+            </button>
+            <button id="btn-export-fold" class="btn btn-secondary" title="Download FOLD 1.1 JSON file">
+              <span>💾 Export .fold</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="editor-main-layout">
+          <!-- 2D Canvas Workspace -->
+          <div id="editor-canvas-container" class="editor-canvas-container"></div>
+
+          <!-- Pop-Out Live 3D Preview Sidebar -->
+          <aside id="preview-sidebar" class="preview-sidebar open">
+            <div class="preview-header">
+              <div class="preview-title">
+                <span class="preview-dot"></span>
+                <h3>Live 3D Fold Preview</h3>
+              </div>
+              <button id="btn-close-preview" class="btn-close">&times;</button>
+            </div>
+
+            <div id="preview-canvas-container" class="preview-canvas-container"></div>
+
+            <div class="preview-controls-bar">
+              <button id="btn-preview-play" class="btn btn-primary btn-round btn-sm" title="Play/Pause 3D Preview">
+                <svg id="preview-play-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                  <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                </svg>
+                <svg id="preview-pause-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="display:none;">
+                  <rect x="6" y="4" width="4" height="16"></rect>
+                  <rect x="14" y="4" width="4" height="16"></rect>
+                </svg>
+              </button>
+
+              <div class="preview-slider-container">
+                <input type="range" id="preview-fold-slider" min="0" max="100" step="0.1" value="0" />
+              </div>
+              <span id="preview-slider-value" class="preview-slider-val">0%</span>
+            </div>
+          </aside>
+
+          <!-- Collapsible Code Panel -->
+          <aside id="code-panel" class="code-panel">
+            <div class="code-header">
+              <h3>FOLD 1.1 JSON Spec</h3>
+              <button id="btn-close-code" class="btn-close">&times;</button>
+            </div>
+            <div class="code-body">
+              <textarea id="json-code-textarea" spellcheck="false"></textarea>
+            </div>
+            <div class="code-footer">
+              <button id="btn-apply-json" class="btn btn-primary btn-sm">Apply Changes</button>
+            </div>
+          </aside>
+        </div>
       </div>
     </main>
-
-    <!-- Floating Bottom Slider & Controls Bar -->
-    <footer class="slider-control-bar">
-      <div class="playback-controls">
-        <button id="btn-play-pause" class="btn btn-primary btn-round" title="Play/Pause Folding Animation">
-          <svg id="play-icon" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-            <polygon points="5 3 19 12 5 21 5 3"></polygon>
-          </svg>
-          <svg id="pause-icon" width="18" height="18" viewBox="0 0 24 24" fill="currentColor" style="display:none;">
-            <rect x="6" y="4" width="4" height="16"></rect>
-            <rect x="14" y="4" width="4" height="16"></rect>
-          </svg>
-        </button>
-
-        <select id="speed-select" class="custom-select speed-select" title="Animation Speed">
-          <option value="0.5">0.5x</option>
-          <option value="1" selected>1.0x</option>
-          <option value="2">2.0x</option>
-        </select>
-      </div>
-
-      <div class="slider-wrapper">
-        <span class="slider-label">Flat</span>
-        <div class="slider-container">
-          <input type="range" id="fold-slider" min="0" max="100" step="0.1" value="0" />
-          <div class="slider-progress" id="slider-progress"></div>
-        </div>
-        <span class="slider-label">Box</span>
-        <div class="slider-value-display" id="slider-value">0%</div>
-      </div>
-    </footer>
 
     <!-- Side Inspector Panel -->
     <aside id="inspector-panel" class="inspector-panel">

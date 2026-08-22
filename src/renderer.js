@@ -408,11 +408,18 @@ export class FoldRenderer {
     this.renderer.render(this.scene, this.camera);
   }
 
+  resize() {
+    if (!this.container) return;
+    const width = this.container.clientWidth || 300;
+    const height = this.container.clientHeight || 300;
+    if (width > 0 && height > 0) {
+      this.camera.aspect = width / height;
+      this.camera.updateProjectionMatrix();
+      this.renderer.setSize(width, height);
+    }
+  }
+
   onWindowResize() {
-    const width = this.container.clientWidth;
-    const height = this.container.clientHeight;
-    this.camera.aspect = width / height;
-    this.camera.updateProjectionMatrix();
-    this.renderer.setSize(width, height);
+    this.resize();
   }
 }

@@ -1,6 +1,7 @@
 import { parseFoldData } from './foldParser.js';
 import { FoldKinematics } from './foldKinematics.js';
 import { FoldRenderer } from './renderer.js';
+import { NetEditor } from './netEditor.js';
 
 class App {
   constructor() {
@@ -14,6 +15,15 @@ class App {
     this.animSpeed = 1.0;
     this.direction = 1; // 1 for forward, -1 for reverse loop
 
+    // Net Editor state
+    this.netEditor = null;
+    this.previewRenderer = null;
+    this.previewKinematics = null;
+    this.previewFoldData = null;
+    this.isPreviewPlaying = false;
+    this.previewDirection = 1;
+
+    this.initNetEditor();
     this.bindUIEvents();
     this.loadDefaultModel();
     this.startAnimationLoop();
@@ -44,9 +54,49 @@ class App {
       this.updateInspectorUI();
       this.resetSlider();
       this.updateFoldProgress();
+
+      // Also update Net Editor if available
+      if (this.netEditor) {
+        this.netEditor.loadFoldJSON(jsonData);
+      }
     } catch (err) {
       console.error('Error initializing FOLD model:', err);
       alert(`Error parsing FOLD file: ${err.message}`);
+    }
+  }
+
+  initNetEditor() {
+    const editorContainer = document.getElementById('editor-canvas-container');
+    if (!editorContainer) return;
+
+    this.netEditor = new NetEditor(editorContainer, (foldJson) => {
+      this.onNetEditorChange(foldJson);
+    });
+
+    // Preview Sidebar Renderer
+    const previewContainer = document.getElementById('preview-canvas-container');
+    if (previewContainer) {
+      this.previewRenderer = new FoldRenderer(previewContainer);
+    }
+  }
+
+  onNetEditorChange(foldJson) {
+    // Update live 3D preview sidebar with in-memory model
+    if (this.previewRenderer) {
+      try {
+        this.previewFoldData = parseFoldData(foldJson);
+        this.previewKinematics = new FoldKinematics(this.previewFoldData);
+        this.previewRenderer.buildModel(this.previewFoldData, this.previewKinematics);
+        this.updatePreviewFoldProgress();
+      } catch (e) {
+        console.warn('Preview fold kinematics warning:', e.message);
+      }
+    }
+
+    // Update JSON code panel textarea
+    const textarea = document.getElementById('json-code-textarea');
+    if (textarea && document.activeElement !== textarea) {
+      textarea.value = JSON.stringify(foldJson, null, 2);
     }
   }
 
@@ -65,23 +115,61 @@ class App {
 
     // Update readout UI
     const valueDisplay = document.getElementById('slider-value');
-    valueDisplay.textContent = `${Math.round(val)}%`;
+    if (valueDisplay) valueDisplay.textContent = `${Math.round(val)}%`;
 
     const progress = document.getElementById('slider-progress');
     if (progress) progress.style.width = `${val}%`;
 
     // Update status badge
     const badgeText = document.getElementById('state-text');
-    if (val === 0) {
-      badgeText.textContent = 'FLAT 2D NET';
-    } else if (val === 100) {
-      badgeText.textContent = '3D BOX';
-    } else {
-      badgeText.textContent = `FOLDING (${Math.round(val)}%)`;
+    if (badgeText) {
+      if (val === 0) {
+        badgeText.textContent = 'FLAT 2D NET';
+      } else if (val === 100) {
+        badgeText.textContent = '3D BOX';
+      } else {
+        badgeText.textContent = `FOLDING (${Math.round(val)}%)`;
+      }
     }
   }
 
+  updatePreviewFoldProgress() {
+    const slider = document.getElementById('preview-fold-slider');
+    if (!slider || !this.previewRenderer) return;
+
+    const val = parseFloat(slider.value);
+    const t = val / 100;
+
+    this.previewRenderer.updateFold(t);
+
+    const valDisplay = document.getElementById('preview-slider-value');
+    if (valDisplay) valDisplay.textContent = `${Math.round(val)}%`;
+  }
+
   bindUIEvents() {
+    // Mode Switcher Tabs
+    const btnMode3D = document.getElementById('btn-mode-3d');
+    const btnModeEditor = document.getElementById('btn-mode-editor');
+    const viewerWorkspace = document.getElementById('viewer-workspace');
+    const editorWorkspace = document.getElementById('editor-workspace');
+
+    btnMode3D.addEventListener('click', () => {
+      btnMode3D.classList.add('active');
+      btnModeEditor.classList.remove('active');
+      viewerWorkspace.classList.add('active');
+      editorWorkspace.classList.remove('active');
+      this.renderer.resize();
+    });
+
+    btnModeEditor.addEventListener('click', () => {
+      btnModeEditor.classList.add('active');
+      btnMode3D.classList.remove('active');
+      editorWorkspace.classList.add('active');
+      viewerWorkspace.classList.remove('active');
+      if (this.netEditor) this.netEditor.resizeCanvas();
+      if (this.previewRenderer) this.previewRenderer.resize();
+    });
+
     // Slider event
     const slider = document.getElementById('fold-slider');
     slider.addEventListener('input', () => {
@@ -136,6 +224,7 @@ class App {
     const themeSelect = document.getElementById('theme-select');
     themeSelect.addEventListener('change', (e) => {
       this.renderer.setTheme(e.target.value);
+      if (this.previewRenderer) this.previewRenderer.setTheme(e.target.value);
     });
 
     // Play/Pause button
@@ -192,7 +281,124 @@ class App {
     const showCreasesCheck = document.getElementById('show-creases-check');
     showCreasesCheck.addEventListener('change', (e) => {
       this.renderer.setShowCreases(e.target.checked);
+      if (this.previewRenderer) this.previewRenderer.setShowCreases(e.target.checked);
       this.updateFoldProgress();
+    });
+
+    // --- Net Editor Toolbar & Controls ---
+    const paletteButtons = document.querySelectorAll('.palette-btn');
+    paletteButtons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        paletteButtons.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const dir = btn.dataset.directive;
+        if (this.netEditor) {
+          this.netEditor.activeDirective = dir;
+          if (this.netEditor.selectedEdgeIndex >= 0) {
+            this.netEditor.setEdgeAssignment(this.netEditor.selectedEdgeIndex, dir);
+          }
+        }
+      });
+    });
+
+    document.getElementById('btn-attach-face').addEventListener('click', () => {
+      if (this.netEditor) {
+        if (this.netEditor.selectedEdgeIndex < 0) {
+          alert('Please click to select an edge first on the 2D Net Editor canvas!');
+        } else {
+          this.netEditor.attachFaceToSelectedEdge();
+        }
+      }
+    });
+
+    document.getElementById('btn-auto-boundary').addEventListener('click', () => {
+      if (this.netEditor) this.netEditor.autoDetectBoundaries();
+    });
+
+    document.getElementById('btn-invert-folds').addEventListener('click', () => {
+      if (this.netEditor) this.netEditor.invertFolds();
+    });
+
+    document.getElementById('btn-center-net').addEventListener('click', () => {
+      if (this.netEditor) this.netEditor.centerView();
+    });
+
+    // Preview Sidebar Toggles & Controls
+    const previewSidebar = document.getElementById('preview-sidebar');
+    const btnTogglePreview = document.getElementById('btn-toggle-preview');
+    const btnClosePreview = document.getElementById('btn-close-preview');
+
+    btnTogglePreview.addEventListener('click', () => {
+      previewSidebar.classList.toggle('open');
+      btnTogglePreview.classList.toggle('active');
+      if (this.previewRenderer) this.previewRenderer.resize();
+    });
+
+    btnClosePreview.addEventListener('click', () => {
+      previewSidebar.classList.remove('open');
+      btnTogglePreview.classList.remove('active');
+    });
+
+    const previewSlider = document.getElementById('preview-fold-slider');
+    previewSlider.addEventListener('input', () => {
+      if (this.isPreviewPlaying) this.pausePreviewAnimation();
+      this.updatePreviewFoldProgress();
+    });
+
+    const btnPreviewPlay = document.getElementById('btn-preview-play');
+    btnPreviewPlay.addEventListener('click', () => {
+      this.togglePreviewAnimation();
+    });
+
+    // Code Panel Toggles & Actions
+    const codePanel = document.getElementById('code-panel');
+    const btnToggleCode = document.getElementById('btn-toggle-code');
+    const btnCloseCode = document.getElementById('btn-close-code');
+    const btnApplyJson = document.getElementById('btn-apply-json');
+
+    btnToggleCode.addEventListener('click', () => {
+      codePanel.classList.toggle('open');
+      btnToggleCode.classList.toggle('active');
+    });
+
+    btnCloseCode.addEventListener('click', () => {
+      codePanel.classList.remove('open');
+      btnToggleCode.classList.remove('active');
+    });
+
+    btnApplyJson.addEventListener('click', () => {
+      const textarea = document.getElementById('json-code-textarea');
+      try {
+        const json = JSON.parse(textarea.value);
+        if (this.netEditor) this.netEditor.loadFoldJSON(json);
+      } catch (err) {
+        alert(`Invalid JSON format: ${err.message}`);
+      }
+    });
+
+    // Send to 3D Viewer Action
+    document.getElementById('btn-send-to-3d').addEventListener('click', () => {
+      if (this.netEditor) {
+        const foldJson = this.netEditor.getFoldJSON();
+        const modelSelect = document.getElementById('model-select');
+        modelSelect.value = 'custom';
+        this.initFoldModel(foldJson);
+        btnMode3D.click();
+      }
+    });
+
+    // Export .fold File Action
+    document.getElementById('btn-export-fold').addEventListener('click', () => {
+      if (!this.netEditor) return;
+      const foldJson = this.netEditor.getFoldJSON();
+      const str = JSON.stringify(foldJson, null, 2);
+      const blob = new Blob([str], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${(foldJson.file_title || 'box-net').toLowerCase().replace(/\s+/g, '-')}.fold`;
+      a.click();
+      URL.revokeObjectURL(url);
     });
   }
 
@@ -229,6 +435,26 @@ class App {
     this.isPlaying = false;
     document.getElementById('play-icon').style.display = 'block';
     document.getElementById('pause-icon').style.display = 'none';
+  }
+
+  togglePreviewAnimation() {
+    if (this.isPreviewPlaying) {
+      this.pausePreviewAnimation();
+    } else {
+      this.startPreviewAnimation();
+    }
+  }
+
+  startPreviewAnimation() {
+    this.isPreviewPlaying = true;
+    document.getElementById('preview-play-icon').style.display = 'none';
+    document.getElementById('preview-pause-icon').style.display = 'block';
+  }
+
+  pausePreviewAnimation() {
+    this.isPreviewPlaying = false;
+    document.getElementById('preview-play-icon').style.display = 'block';
+    document.getElementById('preview-pause-icon').style.display = 'none';
   }
 
   updateInspectorUI() {
@@ -270,16 +496,15 @@ class App {
       const delta = (currentTime - lastTime) / 1000;
       lastTime = currentTime;
 
+      // Main 3D viewer loop
       if (this.isPlaying) {
         const slider = document.getElementById('fold-slider');
         let val = parseFloat(slider.value);
-
-        // Advance slider (0 to 100 in ~3 seconds at 1x speed)
         val += this.direction * (100 / 3) * this.animSpeed * delta;
 
         if (val >= 100) {
           val = 100;
-          this.direction = -1; // Reverse loop or ping-pong
+          this.direction = -1;
         } else if (val <= 0) {
           val = 0;
           this.direction = 1;
@@ -290,6 +515,28 @@ class App {
       }
 
       this.renderer.render();
+
+      // Preview sidebar 3D loop
+      if (this.previewRenderer) {
+        if (this.isPreviewPlaying) {
+          const pSlider = document.getElementById('preview-fold-slider');
+          let pVal = parseFloat(pSlider.value);
+          pVal += this.previewDirection * (100 / 3) * this.animSpeed * delta;
+
+          if (pVal >= 100) {
+            pVal = 100;
+            this.previewDirection = -1;
+          } else if (pVal <= 0) {
+            pVal = 0;
+            this.previewDirection = 1;
+          }
+
+          pSlider.value = pVal;
+          this.updatePreviewFoldProgress();
+        }
+
+        this.previewRenderer.render();
+      }
     };
 
     requestAnimationFrame(animate);
