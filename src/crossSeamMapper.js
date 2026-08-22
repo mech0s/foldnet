@@ -139,7 +139,9 @@ export class CrossSeamMapper {
         polygon: localF0,
         origPolygon2D: f0Coords2D,
         // Transform from local cluster coords to global 2D net coords: [x + cx, y + cy]
-        transformToNet: { tx: cx, ty: cy, rot: 0, scale: 1 }
+        transformToNet: { tx: cx, ty: cy, rot: 0, scale: 1 },
+        clusterToNet: { a: 1, b: 0, c: 0, d: 1, e: cx, f: cy },
+        netToCluster: { a: 1, b: 0, c: 0, d: 1, e: -cx, f: -cy }
       }
     ];
 
@@ -202,7 +204,9 @@ export class CrossSeamMapper {
           polygon: nLocalPolygon,
           origPolygon2D: nOrigCoords,
           sharedEdgeIndex: i,
-          isFoldHinge
+          isFoldHinge,
+          clusterToNet: CrossSeamMapper.computeRigidAffine(nLocalPolygon, nOrigCoords),
+          netToCluster: CrossSeamMapper.computeRigidAffine(nOrigCoords, nLocalPolygon)
         });
       }
     }
@@ -260,5 +264,61 @@ export class CrossSeamMapper {
     const u = (point[0] - minX) / (maxX - minX || 1);
     const v = (point[1] - minY) / (maxY - minY || 1);
     return [u, v];
+  }
+
+  /**
+   * Computes a rigid 2D affine transform {a,b,c,d,e,f} mapping srcPoly → dstPoly
+   * using the first two vertices of each polygon (rotation + uniform scale + translation).
+   *
+   * The affine maps: dst = M * src, where
+   *   dst_x = a * src_x + c * src_y + e
+   *   dst_y = b * src_x + d * src_y + f
+   */
+  static computeRigidAffine(srcPoly, dstPoly) {
+    const s0 = srcPoly[0], s1 = srcPoly[1];
+    const d0 = dstPoly[0], d1 = dstPoly[1];
+
+    const sdx = s1[0] - s0[0], sdy = s1[1] - s0[1];
+    const ddx = d1[0] - d0[0], ddy = d1[1] - d0[1];
+
+    const sLen = Math.hypot(sdx, sdy);
+    const dLen = Math.hypot(ddx, ddy);
+    const scale = sLen > 1e-9 ? dLen / sLen : 1;
+
+    const sAngle = Math.atan2(sdy, sdx);
+    const dAngle = Math.atan2(ddy, ddx);
+    const rot = dAngle - sAngle;
+
+    const cosR = Math.cos(rot) * scale;
+    const sinR = Math.sin(rot) * scale;
+
+    return {
+      a:  cosR,
+      b:  sinR,
+      c: -sinR,
+      d:  cosR,
+      e:  d0[0] - cosR * s0[0] + sinR * s0[1],
+      f:  d0[1] - sinR * s0[0] - cosR * s0[1]
+    };
+  }
+
+  /** Compose two affine transforms: result = m2 ∘ m1  (apply m1 first, then m2). */
+  static composeAffine(m2, m1) {
+    return {
+      a: m2.a * m1.a + m2.c * m1.b,
+      b: m2.b * m1.a + m2.d * m1.b,
+      c: m2.a * m1.c + m2.c * m1.d,
+      d: m2.b * m1.c + m2.d * m1.d,
+      e: m2.a * m1.e + m2.c * m1.f + m2.e,
+      f: m2.b * m1.e + m2.d * m1.f + m2.f
+    };
+  }
+
+  /** Apply an affine to a point: returns {x, y}. */
+  static applyAffine(m, x, y) {
+    return {
+      x: m.a * x + m.c * y + m.e,
+      y: m.b * x + m.d * y + m.f
+    };
   }
 }

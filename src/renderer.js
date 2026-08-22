@@ -290,7 +290,13 @@ export class FoldRenderer {
   }
 
   /**
-   * Updates face textures from Graphic Studio SVG artwork layers
+   * Updates face textures from Graphic Studio SVG artwork layers.
+   *
+   * Each artwork spec carries a `clusterToNet` affine {a,b,c,d,e,f} that maps
+   * the spec's cluster-space coordinates → global 2D net-space coordinates.
+   * We compose this with the face's net→canvas mapping (derived from faceBounds)
+   * so the artwork is rendered at the correct position, rotation & scale on the
+   * 512×512 canvas texture that is UV-mapped to the 3D face.
    */
   updateFaceArtworks(faceArtworks) {
     if (!this.faceMeshes || this.faceMeshes.length === 0) return;
@@ -320,96 +326,34 @@ export class FoldRenderer {
       ctx.fillStyle = bgHex;
       ctx.fillRect(0, 0, 512, 512);
 
+      const bounds = meshItem.faceBounds;
+      const sx = 512 / bounds.width;
+      const sy = 512 / bounds.height;
+
       // Render artwork items onto canvas
       artworks.forEach(item => {
         ctx.save();
-        if (item.type === 'rect') {
-          // Normalize relative to face bounds
-          ctx.fillStyle = item.fill || 'transparent';
-          ctx.strokeStyle = item.stroke || 'transparent';
-          ctx.lineWidth = (item.strokeWidth || 1) * 3;
 
-          const rx = ((item.x + 50) / 100) * 512;
-          const ry = ((item.y + 50) / 100) * 512;
-          const rw = (item.width / 100) * 512;
-          const rh = (item.height / 100) * 512;
-
-          if (item.fill && item.fill !== 'transparent') ctx.fillRect(rx, ry, rw, rh);
-          if (item.stroke && item.stroke !== 'none') ctx.strokeRect(rx, ry, rw, rh);
-        } else if (item.type === 'circle') {
-          ctx.fillStyle = item.fill || 'transparent';
-          ctx.strokeStyle = item.stroke || 'transparent';
-          ctx.lineWidth = (item.strokeWidth || 1) * 3;
-
-          const cx = ((item.cx + 50) / 100) * 512;
-          const cy = ((item.cy + 50) / 100) * 512;
-          const r = (item.r / 100) * 512;
-
-          ctx.beginPath();
-          ctx.arc(cx, cy, r, 0, Math.PI * 2);
-          if (item.fill && item.fill !== 'transparent') ctx.fill();
-          if (item.stroke && item.stroke !== 'none') ctx.stroke();
-        } else if (item.type === 'text') {
-          ctx.fillStyle = item.fill || '#ffffff';
-          const fontSize = ((item.fontSize || 24) / 100) * 512;
-          ctx.font = `bold ${fontSize}px sans-serif`;
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-
-          const tx = ((item.x + 50) / 100) * 512;
-          const ty = ((item.y + 50) / 100) * 512;
-          ctx.fillText(item.text, tx, ty);
-        } else if (item.type === 'stamp') {
-          const sx = ((item.x + 50) / 100) * 512;
-          const sy = ((item.y + 50) / 100) * 512;
-
-          if (item.stampType === 'fragile') {
-            ctx.fillStyle = '#ef4444';
-            ctx.fillRect(sx, sy, 240, 140);
-            ctx.fillStyle = '#ffffff';
-            ctx.font = 'bold 36px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.fillText('FRAGILE', sx + 120, sy + 80);
-          } else if (item.stampType === 'up') {
-            ctx.fillStyle = '#3b82f6';
-            ctx.fillRect(sx, sy, 160, 200);
-            ctx.fillStyle = '#ffffff';
-            ctx.beginPath();
-            ctx.moveTo(sx + 80, sy + 40);
-            ctx.lineTo(sx + 40, sy + 100);
-            ctx.lineTo(sx + 65, sy + 100);
-            ctx.lineTo(sx + 65, sy + 160);
-            ctx.lineTo(sx + 95, sy + 160);
-            ctx.lineTo(sx + 95, sy + 100);
-            ctx.lineTo(sx + 120, sy + 100);
-            ctx.closePath();
-            ctx.fill();
-          } else if (item.stampType === 'recycle') {
-            ctx.fillStyle = '#10b981';
-            ctx.beginPath();
-            ctx.arc(sx + 100, sy + 100, 90, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.fillStyle = '#ffffff';
-            ctx.font = '72px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText('♻', sx + 100, sy + 100);
-          } else if (item.stampType === 'barcode') {
-            ctx.fillStyle = '#ffffff';
-            ctx.fillRect(sx, sy, 260, 140);
-            ctx.fillStyle = '#000000';
-            ctx.fillRect(sx + 20, sy + 20, 12, 100);
-            ctx.fillRect(sx + 45, sy + 20, 6, 100);
-            ctx.fillRect(sx + 65, sy + 20, 18, 100);
-            ctx.fillRect(sx + 100, sy + 20, 8, 100);
-            ctx.fillRect(sx + 125, sy + 20, 16, 100);
-            ctx.fillRect(sx + 160, sy + 20, 24, 100);
-            ctx.fillRect(sx + 200, sy + 20, 10, 100);
-            ctx.fillRect(sx + 225, sy + 20, 14, 100);
-          }
+        // Apply composite cluster→net→canvas transform via ctx.setTransform
+        if (item.clusterToNet) {
+          const m = item.clusterToNet;
+          //  canvas_x = (net_x - minX) * sx
+          //  net_x    = m.a * cx + m.c * cy + m.e
+          // Combined:
+          //  canvas_x = m.a*sx * cx + m.c*sx * cy + (m.e - minX)*sx
+          ctx.setTransform(
+            m.a * sx,              m.b * sy,
+            m.c * sx,              m.d * sy,
+            (m.e - bounds.minX) * sx,
+            (m.f - bounds.minY) * sy
+          );
         }
+
+        this.drawArtworkOnCanvas(ctx, item);
         ctx.restore();
       });
+
+      if (frontMesh.material.map) frontMesh.material.map.dispose();
 
       const texture = new THREE.CanvasTexture(canvas);
       texture.colorSpace = THREE.SRGBColorSpace;
@@ -419,6 +363,104 @@ export class FoldRenderer {
       frontMesh.material.color.setHex(0xffffff);
       frontMesh.material.needsUpdate = true;
     });
+  }
+
+  /** Draws a single artwork spec onto a 2D canvas context (in cluster-space coordinates). */
+  drawArtworkOnCanvas(ctx, item) {
+    if (item.type === 'rect') {
+      if (item.fill && item.fill !== 'transparent') {
+        ctx.fillStyle = item.fill;
+        ctx.fillRect(item.x, item.y, item.width, item.height);
+      }
+      if (item.stroke && item.stroke !== 'none') {
+        ctx.strokeStyle = item.stroke;
+        ctx.lineWidth = item.strokeWidth || 1;
+        ctx.strokeRect(item.x, item.y, item.width, item.height);
+      }
+    } else if (item.type === 'circle') {
+      ctx.beginPath();
+      ctx.arc(item.cx, item.cy, item.r, 0, Math.PI * 2);
+      if (item.fill && item.fill !== 'transparent') {
+        ctx.fillStyle = item.fill;
+        ctx.fill();
+      }
+      if (item.stroke && item.stroke !== 'none') {
+        ctx.strokeStyle = item.stroke;
+        ctx.lineWidth = item.strokeWidth || 1;
+        ctx.stroke();
+      }
+    } else if (item.type === 'text') {
+      ctx.fillStyle = item.fill || '#ffffff';
+      ctx.font = `bold ${item.fontSize || 24}px sans-serif`;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillText(item.text || '', item.x, item.y);
+    } else if (item.type === 'stamp') {
+      this.drawStampOnCanvas(ctx, item);
+    }
+  }
+
+  /** Draws a stamp decal at (item.x, item.y) in cluster-space coordinates. */
+  drawStampOnCanvas(ctx, item) {
+    const x = item.x, y = item.y;
+    if (item.stampType === 'fragile') {
+      ctx.fillStyle = '#ef4444';
+      ctx.fillRect(x, y, 60, 40);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 10px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('FRAGILE', x + 30, y + 20);
+    } else if (item.stampType === 'up') {
+      ctx.fillStyle = '#3b82f6';
+      ctx.fillRect(x, y, 40, 50);
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.moveTo(x + 20, y + 8);
+      ctx.lineTo(x + 10, y + 20);
+      ctx.lineTo(x + 15, y + 20);
+      ctx.lineTo(x + 15, y + 38);
+      ctx.lineTo(x + 25, y + 38);
+      ctx.lineTo(x + 25, y + 20);
+      ctx.lineTo(x + 30, y + 20);
+      ctx.closePath();
+      ctx.fill();
+    } else if (item.stampType === 'recycle') {
+      ctx.fillStyle = '#10b981';
+      ctx.beginPath();
+      ctx.arc(x + 25, y + 25, 22, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '16px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('♻', x + 25, y + 25);
+    } else if (item.stampType === 'barcode') {
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(x, y, 70, 40);
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(x + 5, y + 5, 3, 30);
+      ctx.fillRect(x + 12, y + 5, 2, 30);
+      ctx.fillRect(x + 18, y + 5, 5, 30);
+      ctx.fillRect(x + 28, y + 5, 2, 30);
+      ctx.fillRect(x + 35, y + 5, 4, 30);
+      ctx.fillRect(x + 44, y + 5, 6, 30);
+      ctx.fillRect(x + 55, y + 5, 3, 30);
+      ctx.fillRect(x + 62, y + 5, 4, 30);
+    } else {
+      // Star / Quality Seal
+      ctx.fillStyle = '#f59e0b';
+      ctx.beginPath();
+      const cx = x + 25, cy = y + 25;
+      for (let i = 0; i < 5; i++) {
+        const angle = -Math.PI / 2 + i * 2 * Math.PI / 5;
+        ctx.lineTo(cx + 20 * Math.cos(angle), cy + 20 * Math.sin(angle));
+        const inner = angle + Math.PI / 5;
+        ctx.lineTo(cx + 8 * Math.cos(inner), cy + 8 * Math.sin(inner));
+      }
+      ctx.closePath();
+      ctx.fill();
+    }
   }
 
   buildCreaseLines() {

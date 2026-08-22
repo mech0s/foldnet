@@ -554,14 +554,88 @@ export class GraphicStudio {
     this.renderClusterSVG();
   }
 
-  addArtwork(spec) {
-    const fIdx = spec.faceIndex;
-    if (!this.faceArtworks.has(fIdx)) {
-      this.faceArtworks.set(fIdx, []);
+  // ────────────────────────────────────────────────────────────
+  // Cross-seam artwork replication
+  // ────────────────────────────────────────────────────────────
+
+  /** Bounding box {minX, minY, maxX, maxY} of an artwork spec in cluster space. */
+  getArtworkBBox(spec) {
+    if (spec.type === 'rect') {
+      return { minX: spec.x, minY: spec.y, maxX: spec.x + spec.width, maxY: spec.y + spec.height };
     }
-    this.faceArtworks.get(fIdx).push(spec);
-    this.undoStack.push({ action: 'add', spec, faceIndex: fIdx });
-    this.redoStack = [];
+    if (spec.type === 'circle') {
+      return { minX: spec.cx - spec.r, minY: spec.cy - spec.r, maxX: spec.cx + spec.r, maxY: spec.cy + spec.r };
+    }
+    if (spec.type === 'text') {
+      const estW = (spec.text || '').length * (spec.fontSize || 24) * 0.6;
+      return { minX: spec.x - 5, minY: spec.y - (spec.fontSize || 24), maxX: spec.x + estW, maxY: spec.y + 5 };
+    }
+    if (spec.type === 'stamp') {
+      const sizes = { fragile: [60, 40], up: [40, 50], recycle: [50, 50], barcode: [70, 40], star: [50, 50] };
+      const [w, h] = sizes[spec.stampType] || [60, 40];
+      return { minX: spec.x, minY: spec.y, maxX: spec.x + w, maxY: spec.y + h };
+    }
+    return { minX: -1e9, minY: -1e9, maxX: 1e9, maxY: 1e9 };
+  }
+
+  /** Bounding box of a polygon in cluster space. */
+  getPolygonBBox(polygon) {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    polygon.forEach(p => {
+      if (p[0] < minX) minX = p[0];
+      if (p[1] < minY) minY = p[1];
+      if (p[0] > maxX) maxX = p[0];
+      if (p[1] > maxY) maxY = p[1];
+    });
+    return { minX, minY, maxX, maxY };
+  }
+
+  /** Check if two bounding boxes overlap. */
+  bboxOverlap(a, b) {
+    return a.minX < b.maxX && a.maxX > b.minX && a.minY < b.maxY && a.maxY > b.minY;
+  }
+
+  /**
+   * Stores artwork on ALL overlapping faces in the current cluster.
+   * Each copy carries the face's clusterToNet affine so the 3D renderer
+   * can correctly map cluster-space coordinates to that face's texture.
+   */
+  addArtwork(spec) {
+    if (!this.currentCluster) {
+      // Fallback – no cluster available, store on focus face only
+      const fIdx = spec.faceIndex;
+      if (!this.faceArtworks.has(fIdx)) this.faceArtworks.set(fIdx, []);
+      this.faceArtworks.get(fIdx).push(spec);
+      this.undoStack.push({ action: 'add', spec, faceIndex: fIdx });
+      this.redoStack = [];
+      this.renderClusterSVG();
+      this.notifyTextureUpdate();
+      return;
+    }
+
+    const artBBox = this.getArtworkBBox(spec);
+    const addedPairs = []; // Array<{faceIndex, spec}>
+
+    for (const face of this.currentCluster.clusterFaces) {
+      const faceBBox = this.getPolygonBBox(face.polygon);
+      if (this.bboxOverlap(artBBox, faceBBox)) {
+        const copy = {
+          ...spec,
+          faceIndex: face.faceIndex,
+          clusterToNet: face.clusterToNet   // affine cluster → global 2D net
+        };
+        if (!this.faceArtworks.has(face.faceIndex)) {
+          this.faceArtworks.set(face.faceIndex, []);
+        }
+        this.faceArtworks.get(face.faceIndex).push(copy);
+        addedPairs.push({ faceIndex: face.faceIndex, spec: copy });
+      }
+    }
+
+    if (addedPairs.length > 0) {
+      this.undoStack.push({ action: 'add_multi', pairs: addedPairs });
+      this.redoStack = [];
+    }
 
     this.renderClusterSVG();
     this.notifyTextureUpdate();
@@ -570,12 +644,21 @@ export class GraphicStudio {
   undo() {
     if (this.undoStack.length === 0) return;
     const last = this.undoStack.pop();
+
     if (last.action === 'add') {
       const list = this.faceArtworks.get(last.faceIndex) || [];
       const idx = list.indexOf(last.spec);
       if (idx >= 0) list.splice(idx, 1);
       this.redoStack.push(last);
+    } else if (last.action === 'add_multi') {
+      last.pairs.forEach(pair => {
+        const list = this.faceArtworks.get(pair.faceIndex) || [];
+        const idx = list.indexOf(pair.spec);
+        if (idx >= 0) list.splice(idx, 1);
+      });
+      this.redoStack.push(last);
     }
+
     this.renderClusterSVG();
     this.notifyTextureUpdate();
   }
