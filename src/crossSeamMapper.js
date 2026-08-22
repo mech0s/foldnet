@@ -16,28 +16,7 @@ export class CrossSeamMapper {
     const numFaces = foldData.facesVertices.length;
     const faceAdjacency3D = Array.from({ length: numFaces }, () => []);
 
-    if (cadDualGraph && cadDualGraph.edges) {
-      // Direct CAD 3D dual graph
-      cadDualGraph.edges.forEach(edge => {
-        faceAdjacency3D[edge.f0].push({
-          neighborFace: edge.f1,
-          edgeKey: edge.edgeKey,
-          v1_3D: edge.v1,
-          v2_3D: edge.v2,
-          foldAngleDeg: edge.foldAngleDeg
-        });
-        faceAdjacency3D[edge.f1].push({
-          neighborFace: edge.f0,
-          edgeKey: edge.edgeKey,
-          v1_3D: edge.v2,
-          v2_3D: edge.v1,
-          foldAngleDeg: edge.foldAngleDeg
-        });
-      });
-      return faceAdjacency3D;
-    }
-
-    // For FOLD JSON: Evaluate 3D positions at t = 1.0 (100% folded)
+    // Evaluate 3D positions at t = 1.0 (100% folded)
     const transforms = kinematics ? kinematics.evaluateTransforms(1.0) : null;
     const origCoords = foldData.vertices;
 
@@ -52,61 +31,69 @@ export class CrossSeamMapper {
       });
     });
 
-    // Extract all directed 3D edge segments per face
-    // Key format: rounded 3D coordinates of endpoints "x1,y1,z1-x2,y2,z2"
-    const edgeToFaces = new Map();
-    const tol = 1e-2;
-    const snap = (n) => (Math.round(n / tol) * tol).toFixed(2);
-    const pointKey = (p) => `${snap(p.x)},${snap(p.y)},${snap(p.z)}`;
-
+    // Collect all directed 3D edge segments across all faces
+    const edgeSegments = [];
     faceWorldVerts3D.forEach((verts, fIdx) => {
       const len = verts.length;
       for (let i = 0; i < len; i++) {
         const p1 = verts[i];
         const p2 = verts[(i + 1) % len];
-        const pk1 = pointKey(p1);
-        const pk2 = pointKey(p2);
+        const mid = new THREE.Vector3().addVectors(p1, p2).multiplyScalar(0.5);
+        const segLen = p1.distanceTo(p2);
 
-        const edgeKey = pk1 < pk2 ? `${pk1}_${pk2}` : `${pk2}_${pk1}`;
-        if (!edgeToFaces.has(edgeKey)) {
-          edgeToFaces.set(edgeKey, []);
-        }
-        edgeToFaces.get(edgeKey).push({
+        edgeSegments.push({
           faceIndex: fIdx,
           edgeIndexInFace: i,
           p1,
           p2,
+          mid,
+          segLen,
           v1_2D: foldData.facesVertices[fIdx][i],
           v2_2D: foldData.facesVertices[fIdx][(i + 1) % len]
         });
       }
     });
 
-    // Connect faces that meet in 3D
-    edgeToFaces.forEach((entries, edgeKey) => {
-      if (entries.length === 2) {
-        const e0 = entries[0];
-        const e1 = entries[1];
+    const tol = 1e-2;
+    const numSegs = edgeSegments.length;
 
-        faceAdjacency3D[e0.faceIndex].push({
-          neighborFace: e1.faceIndex,
-          edgeKey,
-          edgeIndexInFace: e0.edgeIndexInFace,
-          v1_2D: e0.v1_2D,
-          v2_2D: e0.v2_2D,
-          neighborEdgeIndex: e1.edgeIndexInFace
-        });
+    // Pair up matching edge segments in 3D
+    for (let i = 0; i < numSegs; i++) {
+      const e0 = edgeSegments[i];
+      for (let j = i + 1; j < numSegs; j++) {
+        const e1 = edgeSegments[j];
+        if (e0.faceIndex === e1.faceIndex) continue;
 
-        faceAdjacency3D[e1.faceIndex].push({
-          neighborFace: e0.faceIndex,
-          edgeKey,
-          edgeIndexInFace: e1.edgeIndexInFace,
-          v1_2D: e1.v1_2D,
-          v2_2D: e1.v2_2D,
-          neighborEdgeIndex: e0.edgeIndexInFace
-        });
+        // Check if midpoints and segment lengths match in 3D
+        if (e0.mid.distanceTo(e1.mid) < tol && Math.abs(e0.segLen - e1.segLen) < tol) {
+          // Check orientation: opposite endpoints vs same endpoints
+          const dOpp = e0.p1.distanceTo(e1.p2) + e0.p2.distanceTo(e1.p1);
+          const dSame = e0.p1.distanceTo(e1.p1) + e0.p2.distanceTo(e1.p2);
+
+          if (dOpp < tol * 2 || dSame < tol * 2) {
+            const isOpposite = dOpp <= dSame;
+
+            faceAdjacency3D[e0.faceIndex].push({
+              neighborFace: e1.faceIndex,
+              edgeIndexInFace: e0.edgeIndexInFace,
+              v1_2D: e0.v1_2D,
+              v2_2D: e0.v2_2D,
+              neighborEdgeIndex: e1.edgeIndexInFace,
+              isOpposite
+            });
+
+            faceAdjacency3D[e1.faceIndex].push({
+              neighborFace: e0.faceIndex,
+              edgeIndexInFace: e1.edgeIndexInFace,
+              v1_2D: e1.v1_2D,
+              v2_2D: e1.v2_2D,
+              neighborEdgeIndex: e0.edgeIndexInFace,
+              isOpposite
+            });
+          }
+        }
       }
-    });
+    }
 
     return faceAdjacency3D;
   }
@@ -156,9 +143,7 @@ export class CrossSeamMapper {
       const p2Local = localF0[(i + 1) % lenF0];
 
       // Find if this edge connects to a 3D neighbor
-      const neighborEntry = neighbors.find(n => 
-        (n.v1_2D === v1 && n.v2_2D === v2) || (n.v1_2D === v2 && n.v2_2D === v1) || n.edgeIndexInFace === i
-      );
+      const neighborEntry = neighbors.find(n => n.edgeIndexInFace === i);
 
       // Check if this edge is a Fold Crease or a Cut in the global 2D net
       const key2D = `${Math.min(v1, v2)}-${Math.max(v1, v2)}`;
@@ -183,19 +168,14 @@ export class CrossSeamMapper {
         const nFaceVerts2D = foldData.facesVertices[nFaceIdx];
         const nOrigCoords = nFaceVerts2D.map(vIdx => origCoords[vIdx]);
 
-        // Find the shared edge on neighbor in 2D or 3D
-        // In local 2D, we rigidly align neighbor edge [v2, v1] to F0 edge [p1Local, p2Local]
-        // Compute edge lengths
-        const hDx = p2Local[0] - p1Local[0];
-        const hDy = p2Local[1] - p1Local[1];
-        const hLen = Math.hypot(hDx, hDy);
-
         // Compute local 2D polygon of neighbor face
+        const isOpposite = neighborEntry.isOpposite !== undefined ? neighborEntry.isOpposite : true;
         const nLocalPolygon = this.alignNeighborFaceToEdge(
           nOrigCoords,
           neighborEntry.neighborEdgeIndex,
           p1Local,
-          p2Local
+          p2Local,
+          isOpposite
         );
 
         clusterFaces.push({
@@ -222,16 +202,20 @@ export class CrossSeamMapper {
   /**
    * Aligns neighbor face 2D polygon to lie rigidly attached to the edge [p1, p2].
    */
-  static alignNeighborFaceToEdge(neighborCoords, neighborEdgeIdx, p1, p2) {
+  static alignNeighborFaceToEdge(neighborCoords, neighborEdgeIdx, p1, p2, isOpposite = true) {
     const len = neighborCoords.length;
     const nv1 = neighborCoords[neighborEdgeIdx];
     const nv2 = neighborCoords[(neighborEdgeIdx + 1) % len];
 
-    // Source edge in neighbor local coords: from nv2 to nv1 (opposite direction)
-    const sDx = nv1[0] - nv2[0];
-    const sDy = nv1[1] - nv2[1];
+    // Source edge endpoints in neighbor local coords
+    const srcStart = isOpposite ? nv2 : nv1;
+    const srcEnd   = isOpposite ? nv1 : nv2;
 
-    // Target edge: from p1 to p2
+    // Source edge vector
+    const sDx = srcEnd[0] - srcStart[0];
+    const sDy = srcEnd[1] - srcStart[1];
+
+    // Target edge vector: from p1 to p2
     const tDx = p2[0] - p1[0];
     const tDy = p2[1] - p1[1];
 
@@ -243,8 +227,8 @@ export class CrossSeamMapper {
     const sin = Math.sin(rotAngle);
 
     return neighborCoords.map(pt => {
-      const rx = (pt[0] - nv2[0]) * cos - (pt[1] - nv2[1]) * sin + p1[0];
-      const ry = (pt[0] - nv2[0]) * sin + (pt[1] - nv2[1]) * cos + p1[1];
+      const rx = (pt[0] - srcStart[0]) * cos - (pt[1] - srcStart[1]) * sin + p1[0];
+      const ry = (pt[0] - srcStart[0]) * sin + (pt[1] - srcStart[1]) * cos + p1[1];
       return [rx, ry];
     });
   }

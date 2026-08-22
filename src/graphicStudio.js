@@ -284,6 +284,18 @@ export class GraphicStudio {
     this.rootGroup.innerHTML = '';
     this.rootGroup.setAttribute('transform', `translate(${centerX}, ${centerY}) scale(${this.zoom})`);
 
+    // 0. Define Per-Face ClipPaths
+    const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+    cluster.clusterFaces.forEach(f => {
+      const clip = document.createElementNS('http://www.w3.org/2000/svg', 'clipPath');
+      clip.setAttribute('id', `face-clip-${f.faceIndex}`);
+      const clipPoly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+      clipPoly.setAttribute('points', f.polygon.map(p => `${p[0]},${p[1]}`).join(' '));
+      clip.appendChild(clipPoly);
+      defs.appendChild(clip);
+    });
+    this.rootGroup.appendChild(defs);
+
     // 1. Render Face Outlines
     cluster.clusterFaces.forEach(f => {
       const ptsStr = f.polygon.map(p => `${p[0]},${p[1]}`).join(' ');
@@ -319,10 +331,29 @@ export class GraphicStudio {
     // 2. Render Existing Artwork for Focus & Neighbor faces
     cluster.clusterFaces.forEach(f => {
       const artworks = this.faceArtworks.get(f.faceIndex) || [];
+      if (artworks.length === 0) return;
+
+      const faceLayer = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      faceLayer.setAttribute('clip-path', `url(#face-clip-${f.faceIndex})`);
+      faceLayer.setAttribute('class', `face-art-layer face-${f.faceIndex}`);
+
       artworks.forEach(item => {
+        // Compute composite transform from item's creation coordinate space to current cluster view
+        const m = item.clusterToNet
+          ? CrossSeamMapper.composeAffine(f.netToCluster, item.clusterToNet)
+          : { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
+
+        const itemGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        itemGroup.setAttribute('transform', `matrix(${m.a} ${m.b} ${m.c} ${m.d} ${m.e} ${m.f})`);
+
         const elem = this.createSVGElementFromSpec(item, f);
-        if (elem) this.rootGroup.appendChild(elem);
+        if (elem) {
+          itemGroup.appendChild(elem);
+          faceLayer.appendChild(itemGroup);
+        }
       });
+
+      this.rootGroup.appendChild(faceLayer);
     });
 
     // 3. Render Edge Hinges & Seam indicators
