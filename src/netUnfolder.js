@@ -371,8 +371,8 @@ export class NetUnfolder {
             pRefPoint = [cx / pCoords2D.length, cy / pCoords2D.length];
           }
 
-          // Align child hinge to parent hinge
-          const cGlobal2D = this.alignFaceHinge2D(cLocal2D, cV1Local, cV2Local, pV1Pos, pV2Pos, pRefPoint);
+          // Align child hinge to parent hinge using pure rigid 2D transformation (no reflection)
+          const cGlobal2D = this.transformPoints2D(cLocal2D, cV1Local, cV2Local, pV1Pos, pV2Pos);
           facePositions2D[cIdx] = cGlobal2D;
 
           // Check overlap
@@ -425,77 +425,54 @@ export class NetUnfolder {
     });
   }
 
-  static alignFaceHinge2D(cLocal2D, cV1, cV2, pV1, pV2, pRefPoint) {
-    const cGlobal = this.transformPoints2D(cLocal2D, cV1, cV2, pV1, pV2);
-    
-    let cx = 0, cy = 0;
-    cGlobal.forEach(p => { cx += p[0]; cy += p[1]; });
-    const cCentroid = [cx / cGlobal.length, cy / cGlobal.length];
-
-    const hDx = pV2[0] - pV1[0];
-    const hDy = pV2[1] - pV1[1];
-
-    const pSide = hDx * (pRefPoint[1] - pV1[1]) - hDy * (pRefPoint[0] - pV1[0]);
-    const cSide = hDx * (cCentroid[1] - pV1[1]) - hDy * (cCentroid[0] - pV1[0]);
-
-    if (Math.sign(pSide) !== 0 && Math.sign(cSide) === Math.sign(pSide)) {
-      const len = Math.hypot(hDx, hDy);
-      const ux = hDx / len, uy = hDy / len;
-      return cGlobal.map(pt => {
-        const rx = pt[0] - pV1[0], ry = pt[1] - pV1[1];
-        const dot = rx * ux + ry * uy;
-        const px = rx - dot * ux, py = ry - dot * uy;
-        return [pV1[0] + dot * ux - px, pV1[1] + dot * uy - py];
-      });
+  static doFacesOverlap2D(polyA, polyB, tol = 1e-3) {
+    // Check if polygons have identical centroids (completely overlapping)
+    let cAx = 0, cAy = 0, cBx = 0, cBy = 0;
+    polyA.forEach(p => { cAx += p[0]; cAy += p[1]; });
+    polyB.forEach(p => { cBx += p[0]; cBy += p[1]; });
+    if (Math.hypot(cAx / polyA.length - cBx / polyB.length, cAy / polyA.length - cBy / polyB.length) < tol) {
+      return true; // Overlapping
     }
-    return cGlobal;
-  }
 
-  static doFacesOverlap2D(faceA, faceB, tol = 1e-3) {
-    const lenA = faceA.length;
-    const lenB = faceB.length;
+    // Separating Axis Theorem (SAT) for 2D convex polygons
+    const polygons = [polyA, polyB];
+    for (let p = 0; p < 2; p++) {
+      const poly = polygons[p];
+      const len = poly.length;
+      for (let i = 0; i < len; i++) {
+        const p1 = poly[i];
+        const p2 = poly[(i + 1) % len];
+        const edge = [p2[0] - p1[0], p2[1] - p1[1]];
+        const normal = [-edge[1], edge[0]]; // Perpendicular normal
+        const nLen = Math.hypot(normal[0], normal[1]);
+        if (nLen < 1e-9) continue;
+        const nx = normal[0] / nLen;
+        const ny = normal[1] / nLen;
 
-    // Edge intersection
-    for (let i = 0; i < lenA; i++) {
-      const a1 = faceA[i], a2 = faceA[(i + 1) % lenA];
-      for (let j = 0; j < lenB; j++) {
-        const b1 = faceB[j], b2 = faceB[(j + 1) % lenB];
-        
-        if ((Math.hypot(a1[0]-b1[0], a1[1]-b1[1]) < tol) || (Math.hypot(a1[0]-b2[0], a1[1]-b2[1]) < tol) ||
-            (Math.hypot(a2[0]-b1[0], a2[1]-b1[1]) < tol) || (Math.hypot(a2[0]-b2[0], a2[1]-b2[1]) < tol)) {
-          continue;
-        }
+        // Project polyA onto normal axis
+        let minA = Infinity, maxA = -Infinity;
+        polyA.forEach(pt => {
+          const proj = pt[0] * nx + pt[1] * ny;
+          if (proj < minA) minA = proj;
+          if (proj > maxA) maxA = proj;
+        });
 
-        const denom = (b2[1] - b1[1]) * (a2[0] - a1[0]) - (b2[0] - b1[0]) * (a2[1] - a1[1]);
-        if (Math.abs(denom) > 1e-9) {
-          const ua = ((b2[0] - b1[0]) * (a1[1] - b1[1]) - (b2[1] - b1[1]) * (a1[0] - b1[0])) / denom;
-          const ub = ((a2[0] - a1[0]) * (a1[1] - b1[1]) - (a2[1] - a1[1]) * (a1[0] - b1[0])) / denom;
-          if (ua > tol && ua < 1 - tol && ub > tol && ub < 1 - tol) return true;
+        // Project polyB onto normal axis
+        let minB = Infinity, maxB = -Infinity;
+        polyB.forEach(pt => {
+          const proj = pt[0] * nx + pt[1] * ny;
+          if (proj < minB) minB = proj;
+          if (proj > maxB) maxB = proj;
+        });
+
+        // If projections do not overlap, separating axis exists (no interior overlap)
+        if (maxA <= minB + tol || maxB <= minA + tol) {
+          return false; // Separating axis found
         }
       }
     }
 
-    const isInside = (px, py, poly) => {
-      let inside = false;
-      for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-        const xi = poly[i][0], yi = poly[i][1], xj = poly[j][0], yj = poly[j][1];
-        if (((yi > py) !== (yj > py)) && (px < (xj - xi) * (py - yi) / (yj - yi + 1e-9) + xi)) inside = !inside;
-      }
-      return inside;
-    };
-
-    // Vertex containment
-    for (let i = 0; i < lenA; i++) {
-      let isShared = false;
-      for (let j = 0; j < lenB; j++) if (Math.hypot(faceA[i][0]-faceB[j][0], faceA[i][1]-faceB[j][1]) < tol) isShared = true;
-      if (!isShared && isInside(faceA[i][0], faceA[i][1], faceB)) return true;
-    }
-    for (let j = 0; j < lenB; j++) {
-      let isShared = false;
-      for (let i = 0; i < lenA; i++) if (Math.hypot(faceB[j][0]-faceA[i][0], faceB[j][1]-faceA[i][1]) < tol) isShared = true;
-      if (!isShared && isInside(faceB[j][0], faceB[j][1], faceA)) return true;
-    }
-
-    return false;
+    // No separating axis found -> Polygons overlap
+    return true;
   }
 }

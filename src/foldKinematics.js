@@ -42,12 +42,18 @@ export class FoldKinematics {
       }
     });
 
-    // Connect adjacent faces
+    // Connect adjacent faces across active fold creases (Valley, Mountain, Flat)
     edgeToFaces.forEach((faceList, edgeKey) => {
       if (faceList.length === 2) {
         const f0 = faceList[0];
         const f1 = faceList[1];
         const edgeIdx = this.fold.edgeLookup.get(edgeKey);
+        const assign = (this.fold.edgesAssignment[edgeIdx] || 'B').toUpperCase();
+
+        // Never hinge across Cut ('C') or Boundary ('B') lines
+        if (assign === 'C' || assign === 'B') {
+          return;
+        }
 
         this.faceAdjacency[f0.faceIndex].push({
           neighborFace: f1.faceIndex,
