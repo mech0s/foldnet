@@ -137,7 +137,7 @@ export class FoldRenderer {
       this.currentTheme = THEMES[themeKey];
       this.scene.background.setHex(this.currentTheme.bg);
       this.gridHelper.material.color.setHex(this.currentTheme.gridColor);
-      
+
       // Update existing materials
       this.faceMeshes.forEach(item => {
         item.frontMesh.material.color.setHex(this.currentTheme.frontColor);
@@ -157,7 +157,7 @@ export class FoldRenderer {
     // For 5+ vertices (e.g. non-convex L-shaped or T-shaped faces)
     const p0 = new THREE.Vector3(...origCoords[faceVerts[0]]);
     const p1 = new THREE.Vector3(...origCoords[faceVerts[1]]);
-    
+
     let uAxis = new THREE.Vector3().subVectors(p1, p0).normalize();
     let normal = null;
 
@@ -390,7 +390,7 @@ export class FoldRenderer {
   centerModel() {
     if (!this.fold) return;
     const box = new THREE.Box3();
-    
+
     // Compute bounding box of initial flat 2D net
     this.fold.vertices.forEach(v => {
       box.expandByPoint(new THREE.Vector3(v[0], v[1], v[2]));

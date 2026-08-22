@@ -18,19 +18,33 @@ export class NetUnfolder {
       throw new Error('Unfolder: No 3D faces provided.');
     }
 
+    console.log(`[NetUnfolder] Unfolding ${facesVerts.length} faces, ${vertices3D.length} vertices.`);
+
     const dualGraph = this.buildDualGraph(vertices3D, facesVerts);
+
+    // Guard: if the dual graph is disconnected, the MST cannot span all faces.
+    const testMST = this.computeKruskalMST(dualGraph.numFaces, dualGraph.edges.map(e => ({ ...e, weight: 0 })));
+    if (testMST.length < dualGraph.numFaces - 1) {
+      throw new Error(
+        `Unfolder: The face adjacency graph is disconnected — only ${testMST.length + 1} of ` +
+        `${dualGraph.numFaces} faces are mutually reachable. This usually means the mesh contains ` +
+        `separate inner/outer shells that were not filtered out.`
+      );
+    }
+
+    // Detect concavity constraints: non-convex faces (>4 vertices) must have their
+    // concavity-filling neighbor connected directly in the spanning tree.
+    // Per Biedl et al., random spanning trees almost never satisfy this constraint.
+    const forcedEdges = this.detectConcavityConstraints(vertices3D, facesVerts, dualGraph);
+    if (forcedEdges.length > 0) {
+      console.log(`[NetUnfolder] ${forcedEdges.length} concavity-constraint edge(s) forced into spanning tree.`);
+    }
 
     let bestResult = null;
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      // Assign uniform random weights to dual edges
-      const weightedEdges = dualGraph.edges.map(e => ({
-        ...e,
-        weight: Math.random()
-      }));
-
-      // Compute Minimum Spanning Tree via Kruskal's algorithm
-      const treeEdges = this.computeKruskalMST(dualGraph.numFaces, weightedEdges);
+      // Build constrained spanning tree: force concavity edges, randomize the rest
+      const treeEdges = this.computeConstrainedMST(dualGraph.numFaces, dualGraph.edges, forcedEdges);
       const rootFace = attempt % dualGraph.numFaces;
 
       // Attempt 2D unrolling and collision test
@@ -47,6 +61,89 @@ export class NetUnfolder {
     }
 
     return this.buildFoldSpecJSON(vertices3D, facesVerts, dualGraph, bestResult);
+  }
+
+  /**
+   * Detect non-convex faces and find the neighbor that fills each concavity.
+   * Returns dual-graph edges that MUST be in the spanning tree.
+   */
+  static detectConcavityConstraints(vertices3D, facesVerts, dualGraph) {
+    const forced = [];
+
+    facesVerts.forEach((fv, fIdx) => {
+      // Non-convex faces have >4 vertices for orthogonal polyhedra (L, T, U shapes)
+      if (fv.length <= 4) return;
+
+      // The concavity-filling neighbor shares an edge with this face and has
+      // all its vertices contained within (or on the boundary of) this face's
+      // bounding rectangle. Find the neighbor with the most shared vertices.
+      const fvSet = new Set(fv);
+      let bestNeighbor = null;
+      let bestSharedCount = 0;
+
+      for (const adj of dualGraph.adjacency[fIdx]) {
+        const nFv = facesVerts[adj.neighbor];
+        // Count how many of the neighbor's vertices are also in this face's vertex set
+        const sharedCount = nFv.filter(v => fvSet.has(v)).length;
+        if (sharedCount > bestSharedCount) {
+          bestSharedCount = sharedCount;
+          bestNeighbor = adj;
+        }
+      }
+
+      // A concavity-filler shares ≥3 vertices with the non-convex face
+      // (the two hinge vertices plus at least one concavity corner)
+      if (bestNeighbor && bestSharedCount >= 3) {
+        forced.push(bestNeighbor.edge);
+      }
+    });
+
+    return forced;
+  }
+
+  /**
+   * Compute a spanning tree that includes all forced edges, then fills the
+   * rest with randomized Kruskal's algorithm.
+   */
+  static computeConstrainedMST(numFaces, allEdges, forcedEdges) {
+    const parent = Array.from({ length: numFaces }, (_, i) => i);
+    const find = (i) => {
+      if (parent[i] === i) return i;
+      parent[i] = find(parent[i]);
+      return parent[i];
+    };
+
+    const mstEdges = [];
+    const forcedKeys = new Set();
+
+    // Step 1: include all forced edges
+    for (const e of forcedEdges) {
+      const root0 = find(e.f0);
+      const root1 = find(e.f1);
+      if (root0 !== root1) {
+        parent[root0] = root1;
+        mstEdges.push(e);
+        forcedKeys.add(e.edgeKey);
+      }
+    }
+
+    // Step 2: randomize remaining edges and complete the spanning tree
+    const remaining = allEdges
+      .filter(e => !forcedKeys.has(e.edgeKey))
+      .map(e => ({ ...e, weight: Math.random() }))
+      .sort((a, b) => a.weight - b.weight);
+
+    for (const e of remaining) {
+      const root0 = find(e.f0);
+      const root1 = find(e.f1);
+      if (root0 !== root1) {
+        parent[root0] = root1;
+        mstEdges.push(e);
+        if (mstEdges.length === numFaces - 1) break;
+      }
+    }
+
+    return mstEdges;
   }
 
   static buildDualGraph(vertices3D, facesVerts) {
@@ -120,6 +217,7 @@ export class NetUnfolder {
       }
     });
 
+    console.log(`[NetUnfolder] buildDualGraph: ${numFaces} faces → ${edges.length} dual edges.`);
     return { numFaces, edges, adjacency, faceNormals };
   }
 
@@ -205,11 +303,29 @@ export class NetUnfolder {
             return { success: false };
           }
 
-          // Parent centroid in 2D
-          const pCentroid = this.computeCentroid2D(pCoords2D);
+          // Determine which side of the hinge edge the parent face occupies.
+          // Using the centroid fails for non-convex (L-shaped) faces because the centroid
+          // can fall in the concave cutout region — on the "wrong" side of an inner hinge edge.
+          // Instead, pick the parent vertex with the greatest perpendicular distance from the
+          // hinge line: it is always unambiguously on the parent's side.
+          const hDx = pV2Pos[0] - pV1Pos[0];
+          const hDy = pV2Pos[1] - pV1Pos[1];
+          let pRefPoint = null;
+          let maxHingeDist = -Infinity;
+          for (let i = 0; i < pCoords2D.length; i++) {
+            const vi = pFaceVerts[i];
+            // Skip the hinge vertices themselves (cross product would be 0)
+            if (vi === v1Idx || vi === v2Idx) continue;
+            const pt = pCoords2D[i];
+            // Perpendicular distance (signed) from hinge line
+            const d = Math.abs(hDx * (pt[1] - pV1Pos[1]) - hDy * (pt[0] - pV1Pos[0]));
+            if (d > maxHingeDist) { maxHingeDist = d; pRefPoint = pt; }
+          }
+          // Fallback if all vertices happen to be on the hinge line
+          if (!pRefPoint) pRefPoint = this.computeCentroid2D(pCoords2D);
 
           // Compute 2D rigid transform matching child hinge edge outward from parent
-          const cGlobal2D = this.alignFaceHinge2D(cLocal2D, cV1Local, cV2Local, pV1Pos, pV2Pos, pCentroid);
+          const cGlobal2D = this.alignFaceHinge2D(cLocal2D, cV1Local, cV2Local, pV1Pos, pV2Pos, pRefPoint);
           facePositions2D[cIdx] = cGlobal2D;
 
           // Check polygon collision against all previously placed 2D faces
@@ -350,21 +466,50 @@ export class NetUnfolder {
       }
     }
 
-    // Check centroid containment
-    const cA = this.computeCentroid2D(faceA);
-    const cB = this.computeCentroid2D(faceB);
+    // Vertex containment test (replaces centroid containment).
+    // For non-convex polygons the centroid can lie outside the polygon's own interior
+    // and inside a neighbor's, causing false positives. Instead, check if any
+    // non-shared vertex of A is strictly inside B, or vice versa.
+    // Shared vertices (hinge points) are excluded since adjacent faces share them.
+    const sharedVerts = this.findSharedVertices2D(faceA, faceB, tol);
 
-    if (this.isPointInsidePolygon2D(cA[0], cA[1], faceB, tol) || this.isPointInsidePolygon2D(cB[0], cB[1], faceA, tol)) {
-      return true;
+    for (let i = 0; i < lenA; i++) {
+      if (sharedVerts.has(i)) continue;
+      if (this.isPointInsidePolygon2D(faceA[i][0], faceA[i][1], faceB, tol)) {
+        return true;
+      }
+    }
+    for (let j = 0; j < lenB; j++) {
+      if (sharedVerts.has(lenA + j)) continue;
+      if (this.isPointInsidePolygon2D(faceB[j][0], faceB[j][1], faceA, tol)) {
+        return true;
+      }
     }
 
     return false;
   }
 
+  /**
+   * Find vertex indices that are shared (within tolerance) between faceA and faceB.
+   * Returns a Set containing indices: 0..lenA-1 for faceA vertices, lenA..lenA+lenB-1 for faceB.
+   */
+  static findSharedVertices2D(faceA, faceB, tol = 1e-3) {
+    const shared = new Set();
+    for (let i = 0; i < faceA.length; i++) {
+      for (let j = 0; j < faceB.length; j++) {
+        if (Math.hypot(faceA[i][0] - faceB[j][0], faceA[i][1] - faceB[j][1]) < tol) {
+          shared.add(i);
+          shared.add(faceA.length + j);
+        }
+      }
+    }
+    return shared;
+  }
+
   static segmentsIntersectStrict(x1, y1, x2, y2, x3, y3, x4, y4, tol = 1e-3) {
     // If segments share an endpoint (hinge vertex), they do not strictly intersect
     if ((Math.hypot(x1 - x3, y1 - y3) < tol || Math.hypot(x1 - x4, y1 - y4) < tol) ||
-        (Math.hypot(x2 - x3, y2 - y3) < tol || Math.hypot(x2 - x4, y2 - y4) < tol)) {
+      (Math.hypot(x2 - x3, y2 - y3) < tol || Math.hypot(x2 - x4, y2 - y4) < tol)) {
       return false;
     }
 
@@ -379,8 +524,22 @@ export class NetUnfolder {
   }
 
   static isPointInsidePolygon2D(px, py, poly, tol = 1e-3) {
-    let inside = false;
+    // First check if point is on any edge (within tolerance) — treat as NOT inside
     const len = poly.length;
+    for (let i = 0; i < len; i++) {
+      const x1 = poly[i][0], y1 = poly[i][1];
+      const x2 = poly[(i + 1) % len][0], y2 = poly[(i + 1) % len][1];
+      const edgeLen = Math.hypot(x2 - x1, y2 - y1);
+      if (edgeLen < 1e-9) continue;
+      // Distance from point to line segment
+      const t = Math.max(0, Math.min(1, ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / (edgeLen * edgeLen)));
+      const projX = x1 + t * (x2 - x1);
+      const projY = y1 + t * (y2 - y1);
+      if (Math.hypot(px - projX, py - projY) < tol) return false;
+    }
+
+    // Standard ray-casting point-in-polygon
+    let inside = false;
     for (let i = 0, j = len - 1; i < len; j = i++) {
       const xi = poly[i][0], yi = poly[i][1];
       const xj = poly[j][0], yj = poly[j][1];
@@ -398,7 +557,7 @@ export class NetUnfolder {
     const vertices_coords = [];
     const vert2DMap = new Map();
 
-    const get2DVertIdx = (x, y, tol = 1e-3) => {
+    const get2DVertIdx = (x, y, tol = 1e-5) => {
       const rx = Math.round(x / tol) * tol;
       const ry = Math.round(y / tol) * tol;
       const key = `${rx},${ry}`;
