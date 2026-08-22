@@ -237,7 +237,7 @@ export class NetEditor {
       const zoomFactor = e.deltaY < 0 ? 1.15 : 0.85;
 
       const mouseWorldBefore = this.screenToWorld(e.offsetX, e.offsetY);
-      this.zoom = Math.min(Math.max(this.zoom * zoomFactor, 10), 300);
+      this.zoom = Math.min(Math.max(this.zoom * zoomFactor, 0.05), 500);
       const mouseWorldAfter = this.screenToWorld(e.offsetX, e.offsetY);
 
       // Adjust pan to zoom around cursor
@@ -272,7 +272,7 @@ export class NetEditor {
 
     const scaleX = (this.canvas.width * 0.7) / width;
     const scaleY = (this.canvas.height * 0.7) / height;
-    this.zoom = Math.min(Math.max(Math.min(scaleX, scaleY), 20), 200);
+    this.zoom = Math.min(Math.max(Math.min(scaleX, scaleY), 0.05), 300);
 
     this.panX = this.canvas.width / 2 - centerX * this.zoom;
     this.panY = this.canvas.height / 2 + centerY * this.zoom;

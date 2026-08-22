@@ -81,7 +81,7 @@ export class FoldRenderer {
       45,
       container.clientWidth / container.clientHeight,
       0.1,
-      1000
+      10000
     );
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
@@ -149,6 +149,45 @@ export class FoldRenderer {
     }
   }
 
+  triangulateFace(faceVerts, origCoords) {
+    const n = faceVerts.length;
+    if (n === 3) return [0, 1, 2];
+    if (n === 4) return [0, 1, 2, 0, 2, 3];
+
+    // For 5+ vertices (e.g. non-convex L-shaped or T-shaped faces)
+    const p0 = new THREE.Vector3(...origCoords[faceVerts[0]]);
+    const p1 = new THREE.Vector3(...origCoords[faceVerts[1]]);
+    
+    let uAxis = new THREE.Vector3().subVectors(p1, p0).normalize();
+    let normal = null;
+
+    for (let i = 2; i < n; i++) {
+      const pI = new THREE.Vector3(...origCoords[faceVerts[i]]);
+      const cross = new THREE.Vector3().crossVectors(uAxis, new THREE.Vector3().subVectors(pI, p0));
+      if (cross.lengthSq() > 1e-6) {
+        normal = cross.normalize();
+        break;
+      }
+    }
+
+    if (!normal) normal = new THREE.Vector3(0, 0, 1);
+    const vAxis = new THREE.Vector3().crossVectors(normal, uAxis).normalize();
+
+    const contour2D = faceVerts.map(vIdx => {
+      const v = new THREE.Vector3(...origCoords[vIdx]);
+      const rel = new THREE.Vector3().subVectors(v, p0);
+      return new THREE.Vector2(rel.dot(uAxis), rel.dot(vAxis));
+    });
+
+    const triangles = THREE.ShapeUtils.triangulateShape(contour2D, []);
+    const indices = [];
+    triangles.forEach(tri => {
+      indices.push(tri[0], tri[1], tri[2]);
+    });
+
+    return indices.length > 0 ? indices : [0, 1, 2];
+  }
+
   buildModel(foldData, kinematics) {
     this.fold = foldData;
     this.kinematics = kinematics;
@@ -165,11 +204,8 @@ export class FoldRenderer {
     const origCoords = this.fold.vertices;
 
     this.fold.facesVertices.forEach((faceVerts, fIdx) => {
-      // Triangulate face (fan triangulation)
-      const indices = [];
-      for (let i = 1; i < faceVerts.length - 1; i++) {
-        indices.push(0, i, i + 1);
-      }
+      // Triangulate face using robust ShapeUtils triangulation (handles non-convex/L-shaped faces)
+      const indices = this.triangulateFace(faceVerts, origCoords);
 
       // Initial positions for face geometry (local to face)
       const positions = new Float32Array(faceVerts.length * 3);
@@ -369,6 +405,8 @@ export class FoldRenderer {
     this.modelGroup.position.set(-center.x, -center.y, 0);
 
     const maxDim = Math.max(size.x, size.y, size.z, 2);
+    this.camera.far = Math.max(10000, maxDim * 20);
+    this.camera.updateProjectionMatrix();
     this.camera.position.set(0, 0, maxDim * 2.2);
     this.controls.target.set(0, 0, 0);
     this.controls.update();
@@ -380,6 +418,8 @@ export class FoldRenderer {
     box.getSize(size);
     const maxDim = Math.max(size.x, size.y, 4);
 
+    this.camera.far = Math.max(10000, maxDim * 20);
+    this.camera.updateProjectionMatrix();
     this.camera.position.set(0, 0, maxDim * 2.2);
     this.controls.target.set(0, 0, 0);
     this.controls.update();
@@ -391,6 +431,8 @@ export class FoldRenderer {
     box.getSize(size);
     const maxDim = Math.max(size.x, size.y, size.z, 4);
 
+    this.camera.far = Math.max(10000, maxDim * 20);
+    this.camera.updateProjectionMatrix();
     this.camera.position.set(maxDim * 1.5, maxDim * 1.5, maxDim * 1.8);
     this.controls.target.set(0, 0, 0);
     this.controls.update();

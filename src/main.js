@@ -2,6 +2,8 @@ import { parseFoldData } from './foldParser.js';
 import { FoldKinematics } from './foldKinematics.js';
 import { FoldRenderer } from './renderer.js';
 import { NetEditor } from './netEditor.js';
+import { CADParser } from './cadParser.js';
+import { NetUnfolder } from './netUnfolder.js';
 
 class App {
   constructor() {
@@ -35,13 +37,14 @@ class App {
     if (!modelSelect) return;
 
     try {
-      // Dynamically discover all JSON files in models/ folder
-      const globModules = import.meta.glob('../models/*.json', { eager: true });
+      const jsonModules = import.meta.glob('../models/*.json', { eager: true });
+      const cadModules = import.meta.glob('../models/*.{stl,obj,step,stp}', { query: '?url', eager: true });
+
       const discovered = [];
 
-      for (const path in globModules) {
+      for (const path in jsonModules) {
         const filename = path.split('/').pop();
-        const mod = globModules[path];
+        const mod = jsonModules[path];
         const data = mod.default || mod;
 
         if (data && typeof data === 'object') {
@@ -57,6 +60,19 @@ class App {
         }
       }
 
+      for (const path in cadModules) {
+        const filename = path.split('/').pop();
+        const mod = cadModules[path];
+        const cadUrl = mod.default || mod;
+
+        discovered.push({
+          url: cadUrl,
+          filename,
+          title: '3D CAD Model',
+          facesCount: null
+        });
+      }
+
       // Sort alphabetically by filename
       discovered.sort((a, b) => a.filename.localeCompare(b.filename));
 
@@ -67,13 +83,13 @@ class App {
       discovered.forEach(m => {
         const opt = document.createElement('option');
         opt.value = m.url;
-        const faceBadge = m.facesCount ? ` (${m.facesCount} Faces)` : '';
+        const faceBadge = m.facesCount ? ` (${m.facesCount} Faces)` : ' (CAD Model)';
         
-        const nameWithoutExt = m.filename.replace(/\.json$/i, '');
+        const nameWithoutExt = m.filename.replace(/\.[^/.]+$/, '');
         const titleClean = m.title.toLowerCase().replace(/[^a-z0-9]+/g, '');
         const nameClean = nameWithoutExt.toLowerCase().replace(/[^a-z0-9]+/g, '');
 
-        if (titleClean === nameClean) {
+        if (titleClean === nameClean || m.title === '3D CAD Model') {
           opt.textContent = `${m.filename}${faceBadge}`;
         } else {
           opt.textContent = `${m.filename} — ${m.title}${faceBadge}`;
@@ -86,7 +102,6 @@ class App {
         modelSelect.appendChild(opt);
       });
 
-      // Add Custom File option
       const customOpt = document.createElement('option');
       customOpt.value = 'custom';
       customOpt.textContent = 'Custom File...';
@@ -94,7 +109,7 @@ class App {
 
       this.defaultModelUrl = defaultSelectedUrl;
     } catch (err) {
-      console.warn('Dynamic model discovery warning:', err);
+      console.warn('Error discovering models:', err);
     }
   }
 
@@ -111,10 +126,26 @@ class App {
 
   async loadModelFromUrl(url) {
     try {
-      const response = await fetch(url);
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-      const json = await response.json();
-      this.initFoldModel(json);
+      const ext = url.split('.').pop().split('?')[0].toLowerCase();
+
+      if (['obj', 'stl', 'step', 'stp'].includes(ext)) {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        
+        const content = ext === 'stl' ? await response.arrayBuffer() : await response.text();
+        const meshData = await CADParser.parseCADFile(content, ext);
+        const planarData = CADParser.extractOrthogonalPlanarFaces(meshData);
+        const foldJson = NetUnfolder.unfoldToFoldJSON(planarData.vertices, planarData.facesVertices);
+        
+        const fileName = url.split('/').pop().split('?')[0];
+        foldJson.file_title = fileName.replace(/\.[^/.]+$/, '');
+        this.initFoldModel(foldJson);
+      } else {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        const json = await response.json();
+        this.initFoldModel(json);
+      }
     } catch (err) {
       console.error('Failed to load model:', err);
       alert(`Could not load model: ${err.message}`);
@@ -272,6 +303,17 @@ class App {
         this.readFoldFile(file);
       }
     });
+
+    // Dedicated CAD file input handler
+    const cadFileInput = document.getElementById('cad-file-input');
+    if (cadFileInput) {
+      cadFileInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (file) {
+          this.readFoldFile(file);
+        }
+      });
+    }
 
     // Drag and drop zone
     const dropZone = document.getElementById('drop-zone');
@@ -524,19 +566,52 @@ class App {
     });
   }
 
-  readFoldFile(file) {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const json = JSON.parse(e.target.result);
-        const modelSelect = document.getElementById('model-select');
-        modelSelect.value = 'custom';
-        this.initFoldModel(json);
-      } catch (err) {
-        alert(`Failed to parse file "${file.name}": Invalid JSON.`);
+  async readFoldFile(file) {
+    const ext = file.name.split('.').pop().toLowerCase();
+    const modelSelect = document.getElementById('model-select');
+
+    if (ext === 'json' || ext === 'fold') {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const json = JSON.parse(e.target.result);
+          if (modelSelect) modelSelect.value = 'custom';
+          this.initFoldModel(json);
+        } catch (err) {
+          alert(`Failed to parse file "${file.name}": Invalid JSON.`);
+        }
+      };
+      reader.readAsText(file);
+    } else if (['obj', 'stl', 'step', 'stp'].includes(ext)) {
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        try {
+          const content = e.target.result;
+          const meshData = await CADParser.parseCADFile(content, ext);
+          const planarData = CADParser.extractOrthogonalPlanarFaces(meshData);
+          const foldJson = NetUnfolder.unfoldToFoldJSON(planarData.vertices, planarData.facesVertices);
+          
+          foldJson.file_title = file.name.replace(/\.[^/.]+$/, '');
+          if (modelSelect) modelSelect.value = 'custom';
+          this.initFoldModel(foldJson);
+
+          // Automatically switch to Net Prep & Editor view
+          const btnModeEditor = document.getElementById('btn-mode-editor');
+          if (btnModeEditor) btnModeEditor.click();
+        } catch (err) {
+          console.error('CAD Import Error:', err);
+          alert(`CAD Import Failed: ${err.message}`);
+        }
+      };
+
+      if (ext === 'stl') {
+        reader.readAsArrayBuffer(file);
+      } else {
+        reader.readAsText(file);
       }
-    };
-    reader.readAsText(file);
+    } else {
+      alert(`Unsupported file format: .${ext}`);
+    }
   }
 
   toggleAnimation() {
