@@ -147,7 +147,7 @@ export class NetEditor {
 
     this.foldData = {
       file_spec: json.file_spec || 1.1,
-      file_title: json.file_title || 'Imported Net',
+      file_title: json.file_title || json.title || 'box-net-prepared',
       file_creator: json.file_creator || 'FOLDNet Editor',
       vertices_coords: coords2D,
       faces_vertices: faces,

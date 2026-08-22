@@ -387,18 +387,54 @@ class App {
       }
     });
 
-    // Export .fold File Action
-    document.getElementById('btn-export-fold').addEventListener('click', () => {
+    // Export FOLD JSON File Action
+    document.getElementById('btn-export-fold').addEventListener('click', async () => {
       if (!this.netEditor) return;
       const foldJson = this.netEditor.getFoldJSON();
       const str = JSON.stringify(foldJson, null, 2);
-      const blob = new Blob([str], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
+
+      let rawTitle = foldJson.file_title || (this.foldData && this.foldData.title ? this.foldData.title : 'box-net');
+      let slug = rawTitle.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+      if (!slug || slug === 'untitled') {
+        slug = 'box-net-prepared';
+      }
+
+      const fileName = `${slug}.json`;
+
+      // Method 1: Try Native File System Access API (Save As Dialog)
+      if ('showSaveFilePicker' in window) {
+        try {
+          const handle = await window.showSaveFilePicker({
+            suggestedName: fileName,
+            types: [{
+              description: 'FOLD 1.1 Spec File (*.json, *.fold)',
+              accept: { 'application/json': ['.json', '.fold'] }
+            }]
+          });
+          const writable = await handle.createWritable();
+          await writable.write(str);
+          await writable.close();
+          return;
+        } catch (err) {
+          if (err.name === 'AbortError') return; // User cancelled dialog
+          console.warn('Native save picker fallback:', err);
+        }
+      }
+
+      // Method 2: Data URI Fallback (guarantees filename without blob: URL UUID issues)
+      const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(str);
       const a = document.createElement('a');
-      a.href = url;
-      a.download = `${(foldJson.file_title || 'box-net').toLowerCase().replace(/\s+/g, '-')}.fold`;
+      a.setAttribute('href', dataUri);
+      a.setAttribute('download', fileName);
+      a.style.display = 'none';
+      document.body.appendChild(a);
       a.click();
-      URL.revokeObjectURL(url);
+
+      setTimeout(() => {
+        if (a.parentNode) {
+          document.body.removeChild(a);
+        }
+      }, 300);
     });
   }
 
