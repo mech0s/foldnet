@@ -103,6 +103,12 @@ class App {
     await this.loadModelFromUrl(url);
   }
 
+  onWindowResize() {
+    if (this.renderer) this.renderer.resize();
+    if (this.netEditor) this.netEditor.resizeCanvas();
+    if (this.previewRenderer) this.previewRenderer.resize();
+  }
+
   async loadModelFromUrl(url) {
     try {
       const response = await fetch(url);
@@ -393,6 +399,9 @@ class App {
       if (this.netEditor) this.netEditor.centerView();
     });
 
+    // Global window resize listener
+    window.addEventListener('resize', () => this.onWindowResize());
+
     // Preview Sidebar Toggles & Controls
     const previewSidebar = document.getElementById('preview-sidebar');
     const btnTogglePreview = document.getElementById('btn-toggle-preview');
@@ -401,12 +410,15 @@ class App {
     btnTogglePreview.addEventListener('click', () => {
       previewSidebar.classList.toggle('open');
       btnTogglePreview.classList.toggle('active');
-      if (this.previewRenderer) this.previewRenderer.resize();
+      setTimeout(() => this.onWindowResize(), 50);
+      setTimeout(() => this.onWindowResize(), 260);
     });
 
     btnClosePreview.addEventListener('click', () => {
       previewSidebar.classList.remove('open');
       btnTogglePreview.classList.remove('active');
+      setTimeout(() => this.onWindowResize(), 50);
+      setTimeout(() => this.onWindowResize(), 260);
     });
 
     const previewSlider = document.getElementById('preview-fold-slider');
@@ -429,11 +441,15 @@ class App {
     btnToggleCode.addEventListener('click', () => {
       codePanel.classList.toggle('open');
       btnToggleCode.classList.toggle('active');
+      setTimeout(() => this.onWindowResize(), 50);
+      setTimeout(() => this.onWindowResize(), 260);
     });
 
     btnCloseCode.addEventListener('click', () => {
       codePanel.classList.remove('open');
       btnToggleCode.classList.remove('active');
+      setTimeout(() => this.onWindowResize(), 50);
+      setTimeout(() => this.onWindowResize(), 260);
     });
 
     btnApplyJson.addEventListener('click', () => {
