@@ -25,6 +25,10 @@ class App {
     this.isPreviewPlaying = false;
     this.previewDirection = 1;
 
+    // Seeded CAD Generation State
+    this.currentCadPlanarData = null;
+    this.currentCadSeed = 1;
+
     this.initNetEditor();
     this.discoverModels();
     this.bindUIEvents();
@@ -135,15 +139,26 @@ class App {
         const content = ext === 'stl' ? await response.arrayBuffer() : await response.text();
         const meshData = await CADParser.parseCADFile(content, ext);
         const planarData = CADParser.extractOrthogonalPlanarFaces(meshData);
-        const foldJson = NetUnfolder.unfoldToFoldJSON(planarData.vertices, planarData.facesVertices);
         
+        // Reset seed to 1 on fresh file load for repeatable generation
+        this.currentCadSeed = 1;
         const fileName = url.split('/').pop().split('?')[0];
-        foldJson.file_title = fileName.replace(/\.[^/.]+$/, '');
+        const fileTitle = fileName.replace(/\.[^/.]+$/, '');
+        this.currentCadPlanarData = { ...planarData, title: fileTitle };
+
+        const foldJson = NetUnfolder.unfoldToFoldJSON(planarData.vertices, planarData.facesVertices, this.currentCadSeed);
+        foldJson.file_title = fileTitle;
+        
+        this.updateRegenButtonUI(true);
         this.initFoldModel(foldJson);
       } else {
         const response = await fetch(url);
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const json = await response.json();
+        
+        this.currentCadPlanarData = null;
+        this.currentCadSeed = 1;
+        this.updateRegenButtonUI(false);
         this.initFoldModel(json);
       }
     } catch (err) {
@@ -441,6 +456,17 @@ class App {
       if (this.netEditor) this.netEditor.centerView();
     });
 
+    // Re-generate CAD Net with next pseudo-random seed
+    const btnRegenTop = document.getElementById('btn-regen-cad');
+    if (btnRegenTop) {
+      btnRegenTop.addEventListener('click', () => this.regenerateCadNet());
+    }
+
+    const btnRegenEditor = document.getElementById('btn-editor-regen-cad');
+    if (btnRegenEditor) {
+      btnRegenEditor.addEventListener('click', () => this.regenerateCadNet());
+    }
+
     // Global window resize listener
     window.addEventListener('resize', () => this.onWindowResize());
 
@@ -575,6 +601,9 @@ class App {
       reader.onload = (e) => {
         try {
           const json = JSON.parse(e.target.result);
+          this.currentCadPlanarData = null;
+          this.currentCadSeed = 1;
+          this.updateRegenButtonUI(false);
           if (modelSelect) modelSelect.value = 'custom';
           this.initFoldModel(json);
         } catch (err) {
@@ -589,9 +618,17 @@ class App {
           const content = e.target.result;
           const meshData = await CADParser.parseCADFile(content, ext);
           const planarData = CADParser.extractOrthogonalPlanarFaces(meshData);
-          const foldJson = NetUnfolder.unfoldToFoldJSON(planarData.vertices, planarData.facesVertices);
           
-          foldJson.file_title = file.name.replace(/\.[^/.]+$/, '');
+          // Reset seed to 1 on fresh CAD load
+          this.currentCadSeed = 1;
+          const fileTitle = file.name.replace(/\.[^/.]+$/, '');
+          this.currentCadPlanarData = { ...planarData, title: fileTitle };
+
+          const foldJson = NetUnfolder.unfoldToFoldJSON(planarData.vertices, planarData.facesVertices, this.currentCadSeed);
+          foldJson.file_title = fileTitle;
+
+          this.updateRegenButtonUI(true);
+
           if (modelSelect) modelSelect.value = 'custom';
           this.initFoldModel(foldJson);
 
@@ -612,6 +649,42 @@ class App {
     } else {
       alert(`Unsupported file format: .${ext}`);
     }
+  }
+
+  regenerateCadNet() {
+    if (!this.currentCadPlanarData) return;
+
+    // Advance to next pseudo-random seed variant
+    this.currentCadSeed++;
+    console.log(`[App] Regenerating CAD net with seed #${this.currentCadSeed}...`);
+
+    try {
+      const foldJson = NetUnfolder.unfoldToFoldJSON(
+        this.currentCadPlanarData.vertices,
+        this.currentCadPlanarData.facesVertices,
+        this.currentCadSeed
+      );
+      foldJson.file_title = this.currentCadPlanarData.title;
+      this.updateRegenButtonUI(true);
+      this.initFoldModel(foldJson);
+    } catch (err) {
+      console.error('Regeneration error:', err);
+      alert(`Could not generate net with seed #${this.currentCadSeed}: ${err.message}`);
+    }
+  }
+
+  updateRegenButtonUI(isCad) {
+    const btnTop = document.getElementById('btn-regen-cad');
+    const btnEditor = document.getElementById('btn-editor-regen-cad');
+    const labelTop = document.getElementById('btn-regen-label');
+    const labelEditor = document.getElementById('btn-editor-regen-label');
+
+    const display = isCad ? 'inline-flex' : 'none';
+    if (btnTop) btnTop.style.display = display;
+    if (btnEditor) btnEditor.style.display = display;
+
+    if (labelTop) labelTop.textContent = `Re-gen Net (Seed #${this.currentCadSeed})`;
+    if (labelEditor) labelEditor.textContent = `🎲 Re-gen Net (Seed #${this.currentCadSeed})`;
   }
 
   toggleAnimation() {
