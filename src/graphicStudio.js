@@ -136,6 +136,15 @@ export class GraphicStudio {
           </div>
 
           <div class="tool-section">
+            <span class="tool-section-title">3D View</span>
+            <div class="action-btn-group">
+              <button id="btn-studio-toggle-preview" class="btn btn-secondary btn-sm active" title="Toggle Pop-Out Live 3D Preview Sidebar">
+                <span>👁️ 3D Preview</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="tool-section">
             <span class="tool-section-title">Actions</span>
             <div class="action-btn-group">
               <button id="btn-studio-undo" class="btn btn-secondary btn-sm" title="Undo (Ctrl+Z)">Undo</button>
@@ -171,6 +180,36 @@ export class GraphicStudio {
             <svg id="navigator-svg" width="160" height="120"></svg>
           </div>
         </main>
+
+        <!-- Pop-Out Live 3D Preview Sidebar in Graphic Studio -->
+        <aside id="studio-preview-sidebar" class="preview-sidebar open">
+          <div class="preview-header">
+            <div class="preview-title">
+              <span class="preview-dot"></span>
+              <h3>Live 3D Fold Preview</h3>
+            </div>
+            <button id="btn-studio-close-preview" class="btn-close">&times;</button>
+          </div>
+
+          <div id="studio-preview-canvas-container" class="preview-canvas-container"></div>
+
+          <div class="preview-controls-bar">
+            <button id="btn-studio-preview-play" class="btn btn-primary btn-round btn-sm" title="Play/Pause 3D Preview">
+              <svg id="studio-preview-play-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <polygon points="5 3 19 12 5 21 5 3"></polygon>
+              </svg>
+              <svg id="studio-preview-pause-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="display:none;">
+                <rect x="6" y="4" width="4" height="16"></rect>
+                <rect x="14" y="4" width="4" height="16"></rect>
+              </svg>
+            </button>
+
+            <div class="preview-slider-container">
+              <input type="range" id="studio-preview-fold-slider" min="0" max="100" step="0.1" value="0" />
+            </div>
+            <span id="studio-preview-slider-value" class="preview-slider-val">0%</span>
+          </div>
+        </aside>
       </div>
     `;
 

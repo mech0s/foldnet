@@ -28,6 +28,9 @@ class App {
 
     // Graphic Studio state
     this.graphicStudio = null;
+    this.studioPreviewRenderer = null;
+    this.isStudioPreviewPlaying = false;
+    this.studioPreviewDirection = 1;
 
     // Seeded CAD Generation State
     this.currentCadPlanarData = null;
@@ -53,8 +56,16 @@ class App {
         if (this.previewRenderer) {
           this.previewRenderer.updateFaceArtworks(artworks);
         }
+        if (this.studioPreviewRenderer) {
+          this.studioPreviewRenderer.updateFaceArtworks(artworks);
+        }
       }
     });
+
+    const studioPreviewContainer = document.getElementById('studio-preview-canvas-container');
+    if (studioPreviewContainer) {
+      this.studioPreviewRenderer = new FoldRenderer(studioPreviewContainer);
+    }
   }
 
   discoverModels() {
@@ -147,6 +158,7 @@ class App {
     if (this.renderer) this.renderer.resize();
     if (this.netEditor) this.netEditor.resizeCanvas();
     if (this.previewRenderer) this.previewRenderer.resize();
+    if (this.studioPreviewRenderer) this.studioPreviewRenderer.resize();
   }
 
   async loadModelFromUrl(url) {
@@ -194,6 +206,11 @@ class App {
       this.kinematics = new FoldKinematics(this.foldData);
       this.renderer.buildModel(this.foldData, this.kinematics);
 
+      if (this.studioPreviewRenderer) {
+        this.studioPreviewRenderer.buildModel(this.foldData, this.kinematics);
+        this.updateStudioPreviewFoldProgress();
+      }
+
       this.updateInspectorUI();
       this.resetSlider();
       this.updateFoldProgress();
@@ -211,6 +228,17 @@ class App {
       console.error('Error initializing FOLD model:', err);
       alert(`Error parsing FOLD file: ${err.message}`);
     }
+  }
+
+  updateStudioPreviewFoldProgress() {
+    if (!this.studioPreviewRenderer) return;
+    const slider = document.getElementById('studio-preview-fold-slider');
+    const valDisplay = document.getElementById('studio-preview-slider-value');
+    if (!slider) return;
+    const val = parseFloat(slider.value);
+    const t = val / 100;
+    this.studioPreviewRenderer.updateFold(t);
+    if (valDisplay) valDisplay.textContent = `${Math.round(val)}%`;
   }
 
   initNetEditor() {
@@ -537,6 +565,44 @@ class App {
       this.togglePreviewAnimation();
     });
 
+    // Graphic Studio 3D Preview Sidebar Toggles & Controls
+    const studioPreviewSidebar = document.getElementById('studio-preview-sidebar');
+    const btnStudioTogglePreview = document.getElementById('btn-studio-toggle-preview');
+    const btnStudioClosePreview = document.getElementById('btn-studio-close-preview');
+
+    if (btnStudioTogglePreview && studioPreviewSidebar) {
+      btnStudioTogglePreview.addEventListener('click', () => {
+        studioPreviewSidebar.classList.toggle('open');
+        btnStudioTogglePreview.classList.toggle('active');
+        setTimeout(() => this.onWindowResize(), 50);
+        setTimeout(() => this.onWindowResize(), 260);
+      });
+    }
+
+    if (btnStudioClosePreview && studioPreviewSidebar) {
+      btnStudioClosePreview.addEventListener('click', () => {
+        studioPreviewSidebar.classList.remove('open');
+        if (btnStudioTogglePreview) btnStudioTogglePreview.classList.remove('active');
+        setTimeout(() => this.onWindowResize(), 50);
+        setTimeout(() => this.onWindowResize(), 260);
+      });
+    }
+
+    const studioPreviewSlider = document.getElementById('studio-preview-fold-slider');
+    if (studioPreviewSlider) {
+      studioPreviewSlider.addEventListener('input', () => {
+        if (this.isStudioPreviewPlaying) this.pauseStudioPreviewAnimation();
+        this.updateStudioPreviewFoldProgress();
+      });
+    }
+
+    const btnStudioPreviewPlay = document.getElementById('btn-studio-preview-play');
+    if (btnStudioPreviewPlay) {
+      btnStudioPreviewPlay.addEventListener('click', () => {
+        this.toggleStudioPreviewAnimation();
+      });
+    }
+
     // Code Panel Toggles & Actions
     const codePanel = document.getElementById('code-panel');
     const btnToggleCode = document.getElementById('btn-toggle-code');
@@ -764,6 +830,30 @@ class App {
     document.getElementById('preview-pause-icon').style.display = 'none';
   }
 
+  toggleStudioPreviewAnimation() {
+    if (this.isStudioPreviewPlaying) {
+      this.pauseStudioPreviewAnimation();
+    } else {
+      this.startStudioPreviewAnimation();
+    }
+  }
+
+  startStudioPreviewAnimation() {
+    this.isStudioPreviewPlaying = true;
+    const playIcon = document.getElementById('studio-preview-play-icon');
+    const pauseIcon = document.getElementById('studio-preview-pause-icon');
+    if (playIcon) playIcon.style.display = 'none';
+    if (pauseIcon) pauseIcon.style.display = 'block';
+  }
+
+  pauseStudioPreviewAnimation() {
+    this.isStudioPreviewPlaying = false;
+    const playIcon = document.getElementById('studio-preview-play-icon');
+    const pauseIcon = document.getElementById('studio-preview-pause-icon');
+    if (playIcon) playIcon.style.display = 'block';
+    if (pauseIcon) pauseIcon.style.display = 'none';
+  }
+
   updateInspectorUI() {
     if (!this.foldData) return;
 
@@ -823,7 +913,7 @@ class App {
 
       this.renderer.render();
 
-      // Preview sidebar 3D loop
+      // Net Editor preview sidebar 3D loop
       if (this.previewRenderer) {
         if (this.isPreviewPlaying) {
           const pSlider = document.getElementById('preview-fold-slider');
@@ -843,6 +933,30 @@ class App {
         }
 
         this.previewRenderer.render();
+      }
+
+      // Graphic Studio preview sidebar 3D loop
+      if (this.studioPreviewRenderer) {
+        if (this.isStudioPreviewPlaying) {
+          const spSlider = document.getElementById('studio-preview-fold-slider');
+          if (spSlider) {
+            let spVal = parseFloat(spSlider.value);
+            spVal += this.studioPreviewDirection * (100 / 3) * this.animSpeed * delta;
+
+            if (spVal >= 100) {
+              spVal = 100;
+              this.studioPreviewDirection = -1;
+            } else if (spVal <= 0) {
+              spVal = 0;
+              this.studioPreviewDirection = 1;
+            }
+
+            spSlider.value = spVal;
+            this.updateStudioPreviewFoldProgress();
+          }
+        }
+
+        this.studioPreviewRenderer.render();
       }
     };
 
