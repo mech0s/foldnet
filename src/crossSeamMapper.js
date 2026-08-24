@@ -147,16 +147,8 @@ export class CrossSeamMapper {
 
     // Visited map: faceIndex -> { branchId, depth, isCoPlanarWithFocus }
     const visitedFaces = new Map();
-
-    // ────────────────────────────────────────────────────────────
-    // TIER 1: Full Expansion of Co-Planar Island around F0
-    // ────────────────────────────────────────────────────────────
-    const coPlanarQueue = [{
-      faceIndex: focusFaceIdx,
-      isFocus: true,
-      polygon: localF0,
-      origPolygon2D: f0Coords2D
-    }];
+    const queue = [];
+    let branchCounter = 0;
 
     visitedFaces.set(focusFaceIdx, { branchId: -1, depth: 0, isCoPlanarWithFocus: true });
 
@@ -173,43 +165,25 @@ export class CrossSeamMapper {
       netToCluster: { a: 1, b: 0, c: 0, d: 1, e: -cx, f: -cy }
     });
 
-    while (coPlanarQueue.length > 0) {
-      const parent = coPlanarQueue.shift();
-      const pIdx = parent.faceIndex;
-      const pVerts2D = foldData.facesVertices[pIdx];
-      const pLen = pVerts2D.length;
-      const neighbors = faceAdjacency3D[pIdx] || [];
+    // Seed the BFS queue with all edges of focus face F0 (initiating Cardinal Branches 0..N-1)
+    const f0Verts2D = foldData.facesVertices[focusFaceIdx];
+    const f0Len = f0Verts2D.length;
+    const f0Neighbors = faceAdjacency3D[focusFaceIdx] || [];
 
-      for (let i = 0; i < pLen; i++) {
-        const neighborEntry = neighbors.find(n => n.edgeIndexInFace === i);
-        if (!neighborEntry || !neighborEntry.isCoPlanar) continue;
+    for (let i = 0; i < f0Len; i++) {
+      const neighborEntry = f0Neighbors.find(n => n.edgeIndexInFace === i);
+      const p1Local = localF0[i];
+      const p2Local = localF0[(i + 1) % f0Len];
+      const v1 = f0Verts2D[i];
+      const v2 = f0Verts2D[(i + 1) % f0Len];
 
+      const key2D = `${Math.min(v1, v2)}-${Math.max(v1, v2)}`;
+      const edgeIdx2D = foldData.edgeLookup ? foldData.edgeLookup.get(key2D) : -1;
+      const assign = edgeIdx2D >= 0 ? (foldData.edgesAssignment[edgeIdx2D] || 'C') : 'C';
+      const isFoldHinge = (assign === 'V' || assign === 'M' || assign === 'F');
+
+      if (neighborEntry) {
         const nFaceIdx = neighborEntry.neighborFace;
-        if (visitedFaces.has(nFaceIdx)) continue;
-
-        visitedFaces.set(nFaceIdx, { branchId: -1, depth: 0, isCoPlanarWithFocus: true });
-
-        const p1Local = parent.polygon[i];
-        const p2Local = parent.polygon[(i + 1) % pLen];
-
-        const nFaceVerts2D = foldData.facesVertices[nFaceIdx];
-        const nOrigCoords = nFaceVerts2D.map(vIdx => origCoords[vIdx]);
-        const isOpposite = neighborEntry.isOpposite !== undefined ? neighborEntry.isOpposite : true;
-
-        const nLocalPolygon = this.alignNeighborFaceToEdge(
-          nOrigCoords,
-          neighborEntry.neighborEdgeIndex,
-          p1Local,
-          p2Local,
-          isOpposite
-        );
-
-        // Record interior flat edge
-        const v1 = pVerts2D[i];
-        const v2 = pVerts2D[(i + 1) % pLen];
-        const key2D = `${Math.min(v1, v2)}-${Math.max(v1, v2)}`;
-        const edgeIdx2D = foldData.edgeLookup ? foldData.edgeLookup.get(key2D) : -1;
-        const assign = edgeIdx2D >= 0 ? (foldData.edgesAssignment[edgeIdx2D] || 'F') : 'F';
 
         clusterEdges.push({
           edgeIndex: i,
@@ -217,129 +191,72 @@ export class CrossSeamMapper {
           v2,
           p1: p1Local,
           p2: p2Local,
-          isFoldHinge: true,
+          isFoldHinge,
           assignment: assign,
           hasNeighbor: true,
           neighborFace: nFaceIdx
         });
 
-        const newFaceItem = {
-          faceIndex: nFaceIdx,
-          isFocus: false,
-          polygon: nLocalPolygon,
-          origPolygon2D: nOrigCoords,
-          branchId: -1,
-          depth: 0,
-          isCoPlanarWithFocus: true,
-          isFoldHinge: true,
-          clusterToNet: CrossSeamMapper.computeRigidAffine(nLocalPolygon, nOrigCoords),
-          netToCluster: CrossSeamMapper.computeRigidAffine(nOrigCoords, nLocalPolygon)
-        };
+        if (!visitedFaces.has(nFaceIdx) && maxDepth >= 1) {
+          const nFaceVerts2D = foldData.facesVertices[nFaceIdx];
+          const nOrigCoords = nFaceVerts2D.map(vIdx => origCoords[vIdx]);
+          const isOpposite = neighborEntry.isOpposite !== undefined ? neighborEntry.isOpposite : true;
 
-        clusterFaces.push(newFaceItem);
-        coPlanarQueue.push(newFaceItem);
-      }
-    }
+          const nLocalPolygon = this.alignNeighborFaceToEdge(
+            nOrigCoords,
+            neighborEntry.neighborEdgeIndex,
+            p1Local,
+            p2Local,
+            isOpposite
+          );
 
-    // ────────────────────────────────────────────────────────────
-    // TIER 2: Cardinal Rays Emitters from Island Perimeter
-    // ────────────────────────────────────────────────────────────
-    const cardinalQueue = [];
-    let branchCounter = 0;
+          if (CrossSeamMapper.checkPolygonOverlap(nLocalPolygon, clusterFaces)) {
+            continue;
+          }
 
-    // Collect all exterior perimeter edges of the co-planar island
-    for (const islandFace of clusterFaces) {
-      const fIdx = islandFace.faceIndex;
-      const fVerts2D = foldData.facesVertices[fIdx];
-      const fLen = fVerts2D.length;
-      const neighbors = faceAdjacency3D[fIdx] || [];
+          const branchId = branchCounter++;
+          visitedFaces.set(nFaceIdx, { branchId, depth: 1, isCoPlanarWithFocus: neighborEntry.isCoPlanar });
 
-      for (let i = 0; i < fLen; i++) {
-        const neighborEntry = neighbors.find(n => n.edgeIndexInFace === i);
-        const p1Local = islandFace.polygon[i];
-        const p2Local = islandFace.polygon[(i + 1) % fLen];
-        const v1 = fVerts2D[i];
-        const v2 = fVerts2D[(i + 1) % fLen];
-
-        const key2D = `${Math.min(v1, v2)}-${Math.max(v1, v2)}`;
-        const edgeIdx2D = foldData.edgeLookup ? foldData.edgeLookup.get(key2D) : -1;
-        const assign = edgeIdx2D >= 0 ? (foldData.edgesAssignment[edgeIdx2D] || 'C') : 'C';
-        const isFoldHinge = (assign === 'V' || assign === 'M' || assign === 'F');
-
-        // Only emit cardinal rays across non-coplanar hinges / seams
-        if (neighborEntry && !neighborEntry.isCoPlanar) {
-          const nFaceIdx = neighborEntry.neighborFace;
-
-          clusterEdges.push({
-            edgeIndex: i,
-            v1,
-            v2,
-            p1: p1Local,
-            p2: p2Local,
+          clusterFaces.push({
+            faceIndex: nFaceIdx,
+            isFocus: false,
+            polygon: nLocalPolygon,
+            origPolygon2D: nOrigCoords,
+            sharedEdgeIndex: i,
+            branchId,
+            depth: 1,
+            isCoPlanarWithFocus: neighborEntry.isCoPlanar,
             isFoldHinge,
-            assignment: assign,
-            hasNeighbor: true,
-            neighborFace: nFaceIdx
+            clusterToNet: CrossSeamMapper.computeRigidAffine(nLocalPolygon, nOrigCoords),
+            netToCluster: CrossSeamMapper.computeRigidAffine(nOrigCoords, nLocalPolygon)
           });
 
-          if (!visitedFaces.has(nFaceIdx) && maxDepth >= 1) {
-            const branchId = branchCounter++;
-            visitedFaces.set(nFaceIdx, { branchId, depth: 1, isCoPlanarWithFocus: false });
-
-            const nFaceVerts2D = foldData.facesVertices[nFaceIdx];
-            const nOrigCoords = nFaceVerts2D.map(vIdx => origCoords[vIdx]);
-            const isOpposite = neighborEntry.isOpposite !== undefined ? neighborEntry.isOpposite : true;
-
-            const nLocalPolygon = this.alignNeighborFaceToEdge(
-              nOrigCoords,
-              neighborEntry.neighborEdgeIndex,
-              p1Local,
-              p2Local,
-              isOpposite
-            );
-
-            clusterFaces.push({
-              faceIndex: nFaceIdx,
-              isFocus: false,
-              polygon: nLocalPolygon,
-              origPolygon2D: nOrigCoords,
-              sharedEdgeIndex: i,
-              branchId,
-              depth: 1,
-              isCoPlanarWithFocus: false,
-              isFoldHinge,
-              clusterToNet: CrossSeamMapper.computeRigidAffine(nLocalPolygon, nOrigCoords),
-              netToCluster: CrossSeamMapper.computeRigidAffine(nOrigCoords, nLocalPolygon)
-            });
-
-            cardinalQueue.push({
-              faceIndex: nFaceIdx,
-              localPolygon: nLocalPolygon,
-              entryEdgeIndex: neighborEntry.neighborEdgeIndex,
-              branchId,
-              depth: 1
-            });
-          }
-        } else if (!neighborEntry) {
-          // Boundary / non-connected cut edge
-          clusterEdges.push({
-            edgeIndex: i,
-            v1,
-            v2,
-            p1: p1Local,
-            p2: p2Local,
-            isFoldHinge,
-            assignment: assign,
-            hasNeighbor: false,
-            neighborFace: null
+          queue.push({
+            faceIndex: nFaceIdx,
+            localPolygon: nLocalPolygon,
+            entryEdgeIndex: neighborEntry.neighborEdgeIndex,
+            branchId,
+            depth: 1
           });
         }
+      } else {
+        clusterEdges.push({
+          edgeIndex: i,
+          v1,
+          v2,
+          p1: p1Local,
+          p2: p2Local,
+          isFoldHinge,
+          assignment: assign,
+          hasNeighbor: false,
+          neighborFace: null
+        });
       }
     }
 
-    // Propagate Cardinal Rays Breadth-First (Depth >= 2)
-    while (cardinalQueue.length > 0) {
-      const current = cardinalQueue.shift();
+    // Propagate Breadth-First: Straight Ahead + Left Turns + Co-Planar expansion
+    while (queue.length > 0) {
+      const current = queue.shift();
       if (current.depth >= maxDepth) continue;
 
       const currFaceIdx = current.faceIndex;
@@ -347,73 +264,99 @@ export class CrossSeamMapper {
       const numVerts = currFaceVerts2D.length;
       const currNeighbors = faceAdjacency3D[currFaceIdx] || [];
 
-      // Forward cardinal step: exit through opposite edge
+      // Determine valid exit edges for recursive expansion:
+      // 1. Straight ahead (opposite edge): (entry + Math.floor(N/2)) % N
+      // 2. Left turn: (entry + 1) % N (counter-clockwise relative to entry edge)
+      // 3. Any co-planar adjacent edge
+      const candidateEdgeIndices = new Set();
+      
       const oppositeEdgeIdx = (current.entryEdgeIndex + Math.floor(numVerts / 2)) % numVerts;
-      const nextNeighborEntry = currNeighbors.find(n => n.edgeIndexInFace === oppositeEdgeIdx);
-      if (!nextNeighborEntry) continue;
+      candidateEdgeIndices.add(oppositeEdgeIdx);
 
-      const nextFaceIdx = nextNeighborEntry.neighborFace;
-      if (visitedFaces.has(nextFaceIdx)) continue; // Stop at collision or already visited
+      // Left-turn edge relative to entry direction
+      const leftTurnEdgeIdx = (current.entryEdgeIndex + 1) % numVerts;
+      candidateEdgeIndices.add(leftTurnEdgeIdx);
 
-      visitedFaces.set(nextFaceIdx, { branchId: current.branchId, depth: current.depth + 1, isCoPlanarWithFocus: false });
-
-      const p1Local = current.localPolygon[oppositeEdgeIdx];
-      const p2Local = current.localPolygon[(oppositeEdgeIdx + 1) % numVerts];
-
-      const nextFaceVerts2D = foldData.facesVertices[nextFaceIdx];
-      const nextOrigCoords = nextFaceVerts2D.map(vIdx => origCoords[vIdx]);
-      const isOpposite = nextNeighborEntry.isOpposite !== undefined ? nextNeighborEntry.isOpposite : true;
-
-      const nextLocalPolygon = this.alignNeighborFaceToEdge(
-        nextOrigCoords,
-        nextNeighborEntry.neighborEdgeIndex,
-        p1Local,
-        p2Local,
-        isOpposite
-      );
-
-      const v1 = currFaceVerts2D[oppositeEdgeIdx];
-      const v2 = currFaceVerts2D[(oppositeEdgeIdx + 1) % numVerts];
-      const key2D = `${Math.min(v1, v2)}-${Math.max(v1, v2)}`;
-      const edgeIdx2D = foldData.edgeLookup ? foldData.edgeLookup.get(key2D) : -1;
-      const assign = edgeIdx2D >= 0 ? (foldData.edgesAssignment[edgeIdx2D] || 'C') : 'C';
-      const isFoldHinge = (assign === 'V' || assign === 'M' || assign === 'F');
-
-      clusterEdges.push({
-        edgeIndex: oppositeEdgeIdx,
-        v1,
-        v2,
-        p1: p1Local,
-        p2: p2Local,
-        isFoldHinge,
-        assignment: assign,
-        hasNeighbor: true,
-        neighborFace: nextFaceIdx
+      // Co-planar adjacent edges
+      currNeighbors.forEach(n => {
+        if (n.isCoPlanar) {
+          candidateEdgeIndices.add(n.edgeIndexInFace);
+        }
       });
 
-      const nextDepth = current.depth + 1;
+      for (const exitEdgeIdx of candidateEdgeIndices) {
+        if (exitEdgeIdx === current.entryEdgeIndex) continue; // Don't turn back through entry edge
 
-      clusterFaces.push({
-        faceIndex: nextFaceIdx,
-        isFocus: false,
-        polygon: nextLocalPolygon,
-        origPolygon2D: nextOrigCoords,
-        sharedEdgeIndex: oppositeEdgeIdx,
-        branchId: current.branchId,
-        depth: nextDepth,
-        isCoPlanarWithFocus: false,
-        isFoldHinge,
-        clusterToNet: CrossSeamMapper.computeRigidAffine(nextLocalPolygon, nextOrigCoords),
-        netToCluster: CrossSeamMapper.computeRigidAffine(nextOrigCoords, nextLocalPolygon)
-      });
+        const nextNeighborEntry = currNeighbors.find(n => n.edgeIndexInFace === exitEdgeIdx);
+        if (!nextNeighborEntry) continue;
 
-      cardinalQueue.push({
-        faceIndex: nextFaceIdx,
-        localPolygon: nextLocalPolygon,
-        entryEdgeIndex: nextNeighborEntry.neighborEdgeIndex,
-        branchId: current.branchId,
-        depth: nextDepth
-      });
+        const nextFaceIdx = nextNeighborEntry.neighborFace;
+        if (visitedFaces.has(nextFaceIdx)) continue; // Avoid duplicate / collision
+
+        const p1Local = current.localPolygon[exitEdgeIdx];
+        const p2Local = current.localPolygon[(exitEdgeIdx + 1) % numVerts];
+
+        const nextFaceVerts2D = foldData.facesVertices[nextFaceIdx];
+        const nextOrigCoords = nextFaceVerts2D.map(vIdx => origCoords[vIdx]);
+        const isOpposite = nextNeighborEntry.isOpposite !== undefined ? nextNeighborEntry.isOpposite : true;
+
+        const nextLocalPolygon = this.alignNeighborFaceToEdge(
+          nextOrigCoords,
+          nextNeighborEntry.neighborEdgeIndex,
+          p1Local,
+          p2Local,
+          isOpposite
+        );
+
+        // Geometrically check if placing this face causes planar overlap with any already-placed face
+        if (CrossSeamMapper.checkPolygonOverlap(nextLocalPolygon, clusterFaces)) {
+          continue;
+        }
+
+        const nextDepth = current.depth + 1;
+        visitedFaces.set(nextFaceIdx, { branchId: current.branchId, depth: nextDepth, isCoPlanarWithFocus: nextNeighborEntry.isCoPlanar });
+
+        const v1 = currFaceVerts2D[exitEdgeIdx];
+        const v2 = currFaceVerts2D[(exitEdgeIdx + 1) % numVerts];
+        const key2D = `${Math.min(v1, v2)}-${Math.max(v1, v2)}`;
+        const edgeIdx2D = foldData.edgeLookup ? foldData.edgeLookup.get(key2D) : -1;
+        const assign = edgeIdx2D >= 0 ? (foldData.edgesAssignment[edgeIdx2D] || 'C') : 'C';
+        const isFoldHinge = (assign === 'V' || assign === 'M' || assign === 'F');
+
+        clusterEdges.push({
+          edgeIndex: exitEdgeIdx,
+          v1,
+          v2,
+          p1: p1Local,
+          p2: p2Local,
+          isFoldHinge,
+          assignment: assign,
+          hasNeighbor: true,
+          neighborFace: nextFaceIdx
+        });
+
+        clusterFaces.push({
+          faceIndex: nextFaceIdx,
+          isFocus: false,
+          polygon: nextLocalPolygon,
+          origPolygon2D: nextOrigCoords,
+          sharedEdgeIndex: exitEdgeIdx,
+          branchId: current.branchId,
+          depth: nextDepth,
+          isCoPlanarWithFocus: nextNeighborEntry.isCoPlanar,
+          isFoldHinge,
+          clusterToNet: CrossSeamMapper.computeRigidAffine(nextLocalPolygon, nextOrigCoords),
+          netToCluster: CrossSeamMapper.computeRigidAffine(nextOrigCoords, nextLocalPolygon)
+        });
+
+        queue.push({
+          faceIndex: nextFaceIdx,
+          localPolygon: nextLocalPolygon,
+          entryEdgeIndex: nextNeighborEntry.neighborEdgeIndex,
+          branchId: current.branchId,
+          depth: nextDepth
+        });
+      }
     }
 
     return {
@@ -529,5 +472,70 @@ export class CrossSeamMapper {
       x: m.a * x + m.c * y + m.e,
       y: m.b * x + m.d * y + m.f
     };
+  }
+
+  /**
+   * Checks if candidate 2D polygon overlaps with any existing placed face polygon (interior overlap).
+   * Tests whether the candidate polygon's centroid or inner test points lie strictly inside any existing face.
+   */
+  static checkPolygonOverlap(candidatePoly, existingFaces) {
+    // Candidate centroid
+    let ccx = 0, ccy = 0;
+    candidatePoly.forEach(p => { ccx += p[0]; ccy += p[1]; });
+    ccx /= candidatePoly.length;
+    ccy /= candidatePoly.length;
+
+    // Candidate bounding box
+    let cMinX = Infinity, cMaxX = -Infinity, cMinY = Infinity, cMaxY = -Infinity;
+    candidatePoly.forEach(p => {
+      cMinX = Math.min(cMinX, p[0]); cMaxX = Math.max(cMaxX, p[0]);
+      cMinY = Math.min(cMinY, p[1]); cMaxY = Math.max(cMaxY, p[1]);
+    });
+    const cWidth = cMaxX - cMinX;
+    const cHeight = cMaxY - cMinY;
+
+    for (const f of existingFaces) {
+      const poly = f.polygon;
+      let fMinX = Infinity, fMaxX = -Infinity, fMinY = Infinity, fMaxY = -Infinity;
+      let fcx = 0, fcy = 0;
+      poly.forEach(p => {
+        fMinX = Math.min(fMinX, p[0]); fMaxX = Math.max(fMaxX, p[0]);
+        fMinY = Math.min(fMinY, p[1]); fMaxY = Math.max(fMaxY, p[1]);
+        fcx += p[0]; fcy += p[1];
+      });
+      fcx /= poly.length;
+      fcy /= poly.length;
+
+      // Check if centroids are practically coincident (overlapping faces)
+      const dCentroid = Math.hypot(ccx - fcx, ccy - fcy);
+      if (dCentroid < 0.25 * Math.min(cWidth, cHeight)) {
+        return true;
+      }
+
+      // Check if candidate centroid is inside existing face polygon
+      if (this.isPointInsidePoly([ccx, ccy], poly)) {
+        return true;
+      }
+
+      // Check if existing face centroid is inside candidate polygon
+      if (this.isPointInsidePoly([fcx, fcy], candidatePoly)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Ray casting point-in-polygon test */
+  static isPointInsidePoly(point, poly) {
+    let inside = false;
+    const len = poly.length;
+    for (let i = 0, j = len - 1; i < len; j = i++) {
+      const xi = poly[i][0], yi = poly[i][1];
+      const xj = poly[j][0], yj = poly[j][1];
+      const intersect = ((yi > point[1]) !== (yj > point[1])) &&
+        (point[0] < (xj - xi) * (point[1] - yi) / (yj - yi || 1e-9) + xi);
+      if (intersect) inside = !inside;
+    }
+    return inside;
   }
 }

@@ -39,6 +39,9 @@ export class GraphicStudio {
     this.isPanning = false;
     this.panStart = { x: 0, y: 0 };
 
+    // Cluster expansion depth (default: 1 for immediate 1-hop neighbors)
+    this.clusterDepth = 1;
+
     // Drawing state
     this.isDrawing = false;
     this.drawStart = null;
@@ -71,11 +74,10 @@ export class GraphicStudio {
           <div class="toolbar-section">
             <span class="toolbar-label">Unpack Depth:</span>
             <select id="studio-depth-select" class="custom-select custom-select-sm" title="Cardinal Unpack Depth">
-              <option value="1">1 (Immediate Neighbors)</option>
-              <option value="2">2 Steps</option>
-              <option value="3">3 Steps</option>
-              <option value="4" selected>4 (Full Cardinal Strips)</option>
-              <option value="8">8 (Deep)</option>
+              <option value="1" selected>1</option>
+              <option value="2">2</option>
+              <option value="3">3</option>
+              <option value="999">Max</option>
             </select>
           </div>
 
