@@ -56,107 +56,11 @@ export class GraphicStudio {
 
   initUI() {
     this.container.innerHTML = `
-      <div class="studio-layout">
-        <!-- Studio Left Toolbar -->
-        <aside class="studio-toolbar">
-          <div class="tool-section">
-            <span class="tool-section-title">Vector Tools</span>
-            <div class="tool-btn-group">
-              <button class="tool-btn" data-tool="select" title="Select & Move (V)">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M3 3l7 18 3-7 7-3L3 3z"></path>
-                </svg>
-                <span>Select</span>
-              </button>
-              <button class="tool-btn active" data-tool="rect" title="Rectangle (R)">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <rect x="3" y="3" width="18" height="18" rx="2"></rect>
-                </svg>
-                <span>Rect</span>
-              </button>
-              <button class="tool-btn" data-tool="circle" title="Circle (C)">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <circle cx="12" cy="12" r="9"></circle>
-                </svg>
-                <span>Circle</span>
-              </button>
-              <button class="tool-btn" data-tool="text" title="Text Label (T)">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <polyline points="4 7 4 4 20 4 20 7"></polyline>
-                  <line x1="9" y1="20" x2="15" y2="20"></line>
-                  <line x1="12" y1="4" x2="12" y2="20"></line>
-                </svg>
-                <span>Text</span>
-              </button>
-              <button class="tool-btn" data-tool="stamp" title="Stamps & Decals (S)">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"></path>
-                </svg>
-                <span>Stamp</span>
-              </button>
-            </div>
-          </div>
-
-          <div class="tool-section">
-            <span class="tool-section-title">Fill & Stroke</span>
-            <div class="color-row">
-              <label class="color-picker-label" title="Fill Color">
-                <span>Fill:</span>
-                <input type="color" id="studio-fill-color" value="#3b82f6" />
-              </label>
-              <label class="color-picker-label" title="Stroke Color">
-                <span>Stroke:</span>
-                <input type="color" id="studio-stroke-color" value="#ffffff" />
-              </label>
-            </div>
-            <div class="control-slider-group">
-              <label>Stroke Width: <span id="val-stroke-width">2px</span></label>
-              <input type="range" id="studio-stroke-width" min="0" max="10" value="2" />
-            </div>
-          </div>
-
-          <div class="tool-section stamp-options" style="display: none;">
-            <span class="tool-section-title">Stamp Type</span>
-            <select id="studio-stamp-select" class="custom-select">
-              <option value="fragile">📦 Fragile / Handle with Care</option>
-              <option value="up">⬆️ This Way Up</option>
-              <option value="recycle">♻️ Recyclable</option>
-              <option value="barcode">📊 Barcode & QR</option>
-              <option value="star">⭐ Quality Seal</option>
-            </select>
-          </div>
-
-          <div class="tool-section text-options" style="display: none;">
-            <span class="tool-section-title">Text Options</span>
-            <input type="text" id="studio-text-input" class="text-input" value="BOX LOGO" placeholder="Enter text..." />
-            <div class="control-slider-group">
-              <label>Font Size: <span id="val-font-size">24px</span></label>
-              <input type="range" id="studio-font-size" min="12" max="64" value="24" />
-            </div>
-          </div>
-
-          <div class="tool-section">
-            <span class="tool-section-title">3D View</span>
-            <div class="action-btn-group">
-              <button id="btn-studio-toggle-preview" class="btn btn-secondary btn-sm active" title="Toggle Pop-Out Live 3D Preview Sidebar">
-                <span>👁️ 3D Preview</span>
-              </button>
-            </div>
-          </div>
-
-          <div class="tool-section">
-            <span class="tool-section-title">Actions</span>
-            <div class="action-btn-group">
-              <button id="btn-studio-undo" class="btn btn-secondary btn-sm" title="Undo (Ctrl+Z)">Undo</button>
-              <button id="btn-studio-clear" class="btn btn-secondary btn-sm" title="Clear current face">Clear Face</button>
-              <button id="btn-studio-clear-all" class="btn btn-danger btn-sm" title="Clear all faces">Reset Art</button>
-            </div>
-          </div>
-        </aside>
-
-        <!-- Studio Main Canvas Viewport -->
-        <main class="studio-canvas-container">
-          <div class="cluster-header-overlay">
+      <div class="studio-wrapper">
+        <!-- Graphic Studio Top Toolbar (matching Net Editor layout) -->
+        <div class="studio-top-toolbar">
+          <div class="toolbar-section">
+            <span class="toolbar-label">Graphic Studio:</span>
             <span class="cluster-badge">Focus Face: <strong id="lbl-focus-face">F0</strong></span>
             <span class="cluster-legend">
               <span class="legend-item"><span class="dot fold-dot"></span> Fold Hinge</span>
@@ -164,52 +68,151 @@ export class GraphicStudio {
             </span>
           </div>
 
-          <svg id="studio-svg-canvas" class="studio-canvas" xmlns="http://www.w3.org/2000/svg">
-            <defs>
-              <pattern id="grid-pattern" width="20" height="20" patternUnits="userSpaceOnUse">
-                <path d="M 20 0 L 0 0 0 20" fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="1" />
-              </pattern>
-            </defs>
-            <rect width="100%" height="100%" fill="url(#grid-pattern)" />
-            <g id="cluster-root-group"></g>
-          </svg>
-
-          <!-- Mini Map Face Navigator -->
-          <div class="face-navigator">
-            <span class="navigator-title">Net Overview (Click Face to Focus)</span>
-            <svg id="navigator-svg" width="160" height="120"></svg>
-          </div>
-        </main>
-
-        <!-- Pop-Out Live 3D Preview Sidebar in Graphic Studio -->
-        <aside id="studio-preview-sidebar" class="preview-sidebar open">
-          <div class="preview-header">
-            <div class="preview-title">
-              <span class="preview-dot"></span>
-              <h3>Live 3D Fold Preview</h3>
-            </div>
-            <button id="btn-studio-close-preview" class="btn-close">&times;</button>
-          </div>
-
-          <div id="studio-preview-canvas-container" class="preview-canvas-container"></div>
-
-          <div class="preview-controls-bar">
-            <button id="btn-studio-preview-play" class="btn btn-primary btn-round btn-sm" title="Play/Pause 3D Preview">
-              <svg id="studio-preview-play-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                <polygon points="5 3 19 12 5 21 5 3"></polygon>
-              </svg>
-              <svg id="studio-preview-pause-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="display:none;">
-                <rect x="6" y="4" width="4" height="16"></rect>
-                <rect x="14" y="4" width="4" height="16"></rect>
-              </svg>
+          <div class="toolbar-section right">
+            <button id="btn-studio-toggle-preview" class="btn btn-secondary active" title="Toggle Pop-Out Live 3D Preview Sidebar">
+              <span>👁️ 3D Preview</span>
             </button>
-
-            <div class="preview-slider-container">
-              <input type="range" id="studio-preview-fold-slider" min="0" max="100" step="0.1" value="0" />
-            </div>
-            <span id="studio-preview-slider-value" class="preview-slider-val">0%</span>
           </div>
-        </aside>
+        </div>
+
+        <div class="studio-layout">
+          <!-- Studio Left Toolbar -->
+          <aside class="studio-toolbar">
+            <div class="tool-section">
+              <span class="tool-section-title">Vector Tools</span>
+              <div class="tool-btn-group">
+                <button class="tool-btn" data-tool="select" title="Select & Move (V)">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M3 3l7 18 3-7 7-3L3 3z"></path>
+                  </svg>
+                  <span>Select</span>
+                </button>
+                <button class="tool-btn active" data-tool="rect" title="Rectangle (R)">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+                  </svg>
+                  <span>Rect</span>
+                </button>
+                <button class="tool-btn" data-tool="circle" title="Circle (C)">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="9"></circle>
+                  </svg>
+                  <span>Circle</span>
+                </button>
+                <button class="tool-btn" data-tool="text" title="Text Label (T)">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="4 7 4 4 20 4 20 7"></polyline>
+                    <line x1="9" y1="20" x2="15" y2="20"></line>
+                    <line x1="12" y1="4" x2="12" y2="20"></line>
+                  </svg>
+                  <span>Text</span>
+                </button>
+                <button class="tool-btn" data-tool="stamp" title="Stamps & Decals (S)">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"></path>
+                  </svg>
+                  <span>Stamp</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="tool-section">
+              <span class="tool-section-title">Fill & Stroke</span>
+              <div class="color-row">
+                <label class="color-picker-label" title="Fill Color">
+                  <span>Fill:</span>
+                  <input type="color" id="studio-fill-color" value="#3b82f6" />
+                </label>
+                <label class="color-picker-label" title="Stroke Color">
+                  <span>Stroke:</span>
+                  <input type="color" id="studio-stroke-color" value="#ffffff" />
+                </label>
+              </div>
+              <div class="control-slider-group">
+                <label>Stroke Width: <span id="val-stroke-width">2px</span></label>
+                <input type="range" id="studio-stroke-width" min="0" max="10" value="2" />
+              </div>
+            </div>
+
+            <div class="tool-section stamp-options" style="display: none;">
+              <span class="tool-section-title">Stamp Type</span>
+              <select id="studio-stamp-select" class="custom-select">
+                <option value="fragile">📦 Fragile / Handle with Care</option>
+                <option value="up">⬆️ This Way Up</option>
+                <option value="recycle">♻️ Recyclable</option>
+                <option value="barcode">📊 Barcode & QR</option>
+                <option value="star">⭐ Quality Seal</option>
+              </select>
+            </div>
+
+            <div class="tool-section text-options" style="display: none;">
+              <span class="tool-section-title">Text Options</span>
+              <input type="text" id="studio-text-input" class="text-input" value="BOX LOGO" placeholder="Enter text..." />
+              <div class="control-slider-group">
+                <label>Font Size: <span id="val-font-size">24px</span></label>
+                <input type="range" id="studio-font-size" min="12" max="64" value="24" />
+              </div>
+            </div>
+
+            <div class="tool-section">
+              <span class="tool-section-title">Actions</span>
+              <div class="action-btn-group">
+                <button id="btn-studio-undo" class="btn btn-secondary btn-sm" title="Undo (Ctrl+Z)">Undo</button>
+                <button id="btn-studio-clear" class="btn btn-secondary btn-sm" title="Clear current face">Clear Face</button>
+                <button id="btn-studio-clear-all" class="btn btn-danger btn-sm" title="Clear all faces">Reset Art</button>
+              </div>
+            </div>
+          </aside>
+
+          <!-- Studio Main Canvas Viewport -->
+          <main class="studio-canvas-container">
+            <svg id="studio-svg-canvas" class="studio-canvas" xmlns="http://www.w3.org/2000/svg">
+              <defs>
+                <pattern id="grid-pattern" width="20" height="20" patternUnits="userSpaceOnUse">
+                  <path d="M 20 0 L 0 0 0 20" fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="1" />
+                </pattern>
+              </defs>
+              <rect width="100%" height="100%" fill="url(#grid-pattern)" />
+              <g id="cluster-root-group"></g>
+            </svg>
+
+            <!-- Mini Map Face Navigator -->
+            <div class="face-navigator">
+              <span class="navigator-title">Net Overview (Click Face to Focus)</span>
+              <svg id="navigator-svg" width="160" height="120"></svg>
+            </div>
+          </main>
+
+          <!-- Pop-Out Live 3D Preview Sidebar in Graphic Studio -->
+          <aside id="studio-preview-sidebar" class="preview-sidebar open">
+            <div class="preview-header">
+              <div class="preview-title">
+                <span class="preview-dot"></span>
+                <h3>Live 3D Fold Preview</h3>
+              </div>
+              <button id="btn-studio-close-preview" class="btn-close">&times;</button>
+            </div>
+
+            <div id="studio-preview-canvas-container" class="preview-canvas-container"></div>
+
+            <div class="preview-controls-bar">
+              <button id="btn-studio-preview-play" class="btn btn-primary btn-round btn-sm" title="Play/Pause 3D Preview">
+                <svg id="studio-preview-play-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                  <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                </svg>
+                <svg id="studio-preview-pause-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="display:none;">
+                  <rect x="6" y="4" width="4" height="16"></rect>
+                  <rect x="14" y="4" width="4" height="16"></rect>
+                </svg>
+              </button>
+
+              <div class="preview-slider-container">
+                <input type="range" id="studio-preview-fold-slider" min="0" max="100" step="0.1" value="0" />
+              </div>
+              <span id="studio-preview-slider-value" class="preview-slider-val">0%</span>
+            </div>
+          </aside>
+        </div>
       </div>
     `;
 

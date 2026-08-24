@@ -367,7 +367,7 @@ export class FoldRenderer {
           );
         }
 
-        this.drawArtworkOnCanvas(ctx, item);
+        this.drawArtworkOnCanvas(ctx, item, sx, sy);
         ctx.restore();
       });
 
@@ -384,7 +384,11 @@ export class FoldRenderer {
   }
 
   /** Draws a single artwork spec onto a 2D canvas context (in cluster-space coordinates). */
-  drawArtworkOnCanvas(ctx, item) {
+  drawArtworkOnCanvas(ctx, item, sx = 512, sy = 512) {
+    // Normalizing stroke width: ctx transform scales by sx, so divide stroke width by sx to get exact canvas pixels
+    const sw = (item.strokeWidth || 2) / (sx || 512);
+    const unitScale = item.unitScale || 1;
+
     if (item.type === 'rect') {
       if (item.fill && item.fill !== 'transparent') {
         ctx.fillStyle = item.fill;
@@ -392,7 +396,7 @@ export class FoldRenderer {
       }
       if (item.stroke && item.stroke !== 'none') {
         ctx.strokeStyle = item.stroke;
-        ctx.lineWidth = item.strokeWidth || 1;
+        ctx.lineWidth = sw;
         ctx.strokeRect(item.x, item.y, item.width, item.height);
       }
     } else if (item.type === 'circle') {
@@ -404,23 +408,29 @@ export class FoldRenderer {
       }
       if (item.stroke && item.stroke !== 'none') {
         ctx.strokeStyle = item.stroke;
-        ctx.lineWidth = item.strokeWidth || 1;
+        ctx.lineWidth = sw;
         ctx.stroke();
       }
     } else if (item.type === 'text') {
       ctx.fillStyle = item.fill || '#ffffff';
-      ctx.font = `bold ${item.fontSize || 24}px sans-serif`;
+      const fSize = (item.fontSize || 24) * unitScale;
+      ctx.font = `bold ${fSize}px sans-serif`;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'top';
       ctx.fillText(item.text || '', item.x, item.y);
     } else if (item.type === 'stamp') {
+      ctx.save();
+      ctx.translate(item.x, item.y);
+      const scaleFactor = (item.scale || 1) * unitScale;
+      ctx.scale(scaleFactor, scaleFactor);
       this.drawStampOnCanvas(ctx, item);
+      ctx.restore();
     }
   }
 
-  /** Draws a stamp decal at (item.x, item.y) in cluster-space coordinates. */
+  /** Draws a stamp decal at local origin (0, 0). */
   drawStampOnCanvas(ctx, item) {
-    const x = item.x, y = item.y;
+    const x = 0, y = 0;
     if (item.stampType === 'fragile') {
       ctx.fillStyle = '#ef4444';
       ctx.fillRect(x, y, 60, 40);
