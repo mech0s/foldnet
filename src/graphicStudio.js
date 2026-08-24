@@ -68,6 +68,17 @@ export class GraphicStudio {
             </span>
           </div>
 
+          <div class="toolbar-section">
+            <span class="toolbar-label">Unpack Depth:</span>
+            <select id="studio-depth-select" class="custom-select custom-select-sm" title="Cardinal Unpack Depth">
+              <option value="1">1 (Immediate Neighbors)</option>
+              <option value="2">2 Steps</option>
+              <option value="3">3 Steps</option>
+              <option value="4" selected>4 (Full Cardinal Strips)</option>
+              <option value="8">8 (Deep)</option>
+            </select>
+          </div>
+
           <div class="toolbar-section right">
             <button id="btn-studio-toggle-preview" class="btn btn-secondary active" title="Toggle Pop-Out Live 3D Preview Sidebar">
               <span>👁️ 3D Preview</span>
@@ -260,6 +271,14 @@ export class GraphicStudio {
     const stampSelect = this.container.querySelector('#studio-stamp-select');
     stampSelect.addEventListener('change', (e) => { this.activeStamp = e.target.value; });
 
+    const depthSelect = this.container.querySelector('#studio-depth-select');
+    if (depthSelect) {
+      depthSelect.addEventListener('change', (e) => {
+        this.clusterDepth = parseInt(e.target.value, 10) || 4;
+        this.updateClusterView();
+      });
+    }
+
     // Actions
     this.container.querySelector('#btn-studio-undo').addEventListener('click', () => this.undo());
     this.container.querySelector('#btn-studio-clear').addEventListener('click', () => this.clearActiveFace());
@@ -353,10 +372,12 @@ export class GraphicStudio {
   updateClusterView() {
     if (!this.foldData) return;
 
+    const depth = this.clusterDepth || 4;
     this.currentCluster = CrossSeamMapper.buildNeighborCluster(
       this.focusFaceIndex,
       this.foldData,
-      this.faceAdjacency3D
+      this.faceAdjacency3D,
+      depth
     );
 
     this.container.querySelector('#lbl-focus-face').textContent = `F${this.focusFaceIndex}`;
