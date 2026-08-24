@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 
 export const THEMES = {
   highContrast: {
@@ -97,7 +98,7 @@ export class FoldRenderer {
     this.controls.dampingFactor = 0.05;
 
     this.setupLights();
-    this.setupGrid();
+    // (Ground grid mesh removed for a clean modern viewport)
 
     // Raycasting for interactive 3D face selection
     this.raycaster = new THREE.Raycaster();
@@ -135,16 +136,17 @@ export class FoldRenderer {
 
     this.faceMeshes = [];
     this.creaseLines = null;
-    this.showCreases = true;
+    // Show creases if explicitly requested (e.g. for 3D preview pop-outs), otherwise clean by default
+    this.showCreases = options.showCreases !== undefined ? options.showCreases : false;
 
     window.addEventListener('resize', () => this.onWindowResize());
   }
 
   setupLights() {
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.85);
     this.scene.add(ambientLight);
 
-    const dirLight1 = new THREE.DirectionalLight(0xffffff, 1.2);
+    const dirLight1 = new THREE.DirectionalLight(0xffffff, 1.0);
     dirLight1.position.set(10, 20, 15);
     dirLight1.castShadow = true;
     dirLight1.shadow.mapSize.width = 2048;
@@ -157,17 +159,13 @@ export class FoldRenderer {
     this.scene.add(dirLight2);
   }
 
-  setupGrid() {
-    this.gridHelper = new THREE.GridHelper(20, 20, this.currentTheme.gridColor, this.currentTheme.gridColor);
-    this.gridHelper.position.y = -0.01;
-    this.scene.add(this.gridHelper);
-  }
-
   setTheme(themeKey) {
     if (THEMES[themeKey]) {
       this.currentTheme = THEMES[themeKey];
       this.scene.background.setHex(this.currentTheme.bg);
-      this.gridHelper.material.color.setHex(this.currentTheme.gridColor);
+      if (this.gridHelper) {
+        this.gridHelper.material.color.setHex(this.currentTheme.gridColor);
+      }
 
       // Update existing materials
       this.faceMeshes.forEach(item => {
@@ -726,5 +724,45 @@ export class FoldRenderer {
 
   onWindowResize() {
     this.resize();
+  }
+
+  /**
+   * Exports the current 3D model (including textures and active fold state) as a binary .glb file.
+   * @param {string} filename Output file name without extension
+   * @returns {Promise<void>}
+   */
+  async exportGLB(filename = 'folded-model') {
+    if (!this.modelGroup || this.modelGroup.children.length === 0) {
+      alert('No 3D model available to export.');
+      return;
+    }
+
+    const exporter = new GLTFExporter();
+    const options = {
+      binary: true,
+      onlyVisible: true,
+      embedImages: true
+    };
+
+    return new Promise((resolve, reject) => {
+      exporter.parse(
+        this.modelGroup,
+        (gltf) => {
+          const blob = new Blob([gltf], { type: 'model/gltf-binary' });
+          const link = document.createElement('a');
+          link.href = URL.createObjectURL(blob);
+          link.download = `${filename}.glb`;
+          link.click();
+          URL.revokeObjectURL(link.href);
+          resolve();
+        },
+        (error) => {
+          console.error('An error occurred exporting GLB:', error);
+          alert(`Error exporting GLB: ${error.message || error}`);
+          reject(error);
+        },
+        options
+      );
+    });
   }
 }

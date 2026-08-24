@@ -65,6 +65,7 @@ class App {
     const studioPreviewContainer = document.getElementById('studio-preview-canvas-container');
     if (studioPreviewContainer) {
       this.studioPreviewRenderer = new FoldRenderer(studioPreviewContainer, {
+        showCreases: true,
         onFaceClick: (faceIdx) => {
           if (this.graphicStudio) {
             this.graphicStudio.setFocusFace(faceIdx);
@@ -260,7 +261,7 @@ class App {
     // Preview Sidebar Renderer
     const previewContainer = document.getElementById('preview-canvas-container');
     if (previewContainer) {
-      this.previewRenderer = new FoldRenderer(previewContainer);
+      this.previewRenderer = new FoldRenderer(previewContainer, { showCreases: true });
       const themeSelect = document.getElementById('theme-select');
       if (themeSelect) this.previewRenderer.setTheme(themeSelect.value);
     }
@@ -686,16 +687,17 @@ class App {
       }
     });
 
-    // Send to 3D Viewer Action
-    document.getElementById('btn-send-to-3d').addEventListener('click', () => {
-      if (this.netEditor) {
-        const foldJson = this.netEditor.getFoldJSON();
-        const modelSelect = document.getElementById('model-select');
-        modelSelect.value = 'custom';
-        this.initFoldModel(foldJson);
-        btnMode3D.click();
-      }
-    });
+    // GLB 3D Model Export Action (Full 3D Fold Viewer)
+    const btnExportGlb = document.getElementById('btn-export-glb');
+    if (btnExportGlb) {
+      btnExportGlb.addEventListener('click', async () => {
+        const rawTitle = this.foldData && this.foldData.title ? this.foldData.title : 'folded-box';
+        const slug = rawTitle.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'folded-box';
+        if (this.renderer) {
+          await this.renderer.exportGLB(slug);
+        }
+      });
+    }
 
     // Export FOLD JSON File Action
     document.getElementById('btn-export-fold').addEventListener('click', async () => {
