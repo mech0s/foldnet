@@ -731,7 +731,8 @@ export class GraphicStudio {
     const scale = Math.min(140 / w, 100 / h);
 
     const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-    g.setAttribute('transform', `translate(${10 + (140 - w * scale) / 2}, ${10 + (100 - h * scale) / 2}) scale(${scale}) translate(${-minX}, ${-minY})`);
+    // Flip Y scale (-scale) so +Y is up, matching Cartesian / Net Editor orientation
+    g.setAttribute('transform', `translate(${10 + (140 - w * scale) / 2}, ${10 + (100 + h * scale) / 2}) scale(${scale}, ${-scale}) translate(${-minX}, ${-minY})`);
 
     this.foldData.facesVertices.forEach((fv, fIdx) => {
       const ptsStr = fv.map(vIdx => `${origCoords[vIdx][0]},${origCoords[vIdx][1]}`).join(' ');

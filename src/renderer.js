@@ -338,7 +338,7 @@ export class FoldRenderer {
         meshItem.faceVerts.forEach((vIdx, i) => {
           const c = origCoords[vIdx];
           const px = (c[0] - bounds.minX) * sx;
-          const py = (bounds.maxY - c[1]) * sy;
+          const py = (c[1] - bounds.minY) * sy;
           if (i === 0) ctx.moveTo(px, py);
           else ctx.lineTo(px, py);
         });
@@ -351,20 +351,19 @@ export class FoldRenderer {
         ctx.save();
 
         // Apply composite cluster→net→canvas transform via ctx.setTransform
-        // Note: Canvas Y is flipped relative to 3D UV space (flipY = true)
         // Canvas_x = (net_x - bounds.minX) * sx
-        // Canvas_y = (bounds.maxY - net_y) * sy
+        // Canvas_y = (net_y - bounds.minY) * sy
         // net_x = m.a * cx + m.c * cy + m.e
         // net_y = m.b * cx + m.d * cy + m.f
         if (item.clusterToNet) {
           const m = item.clusterToNet;
           ctx.setTransform(
-             m.a * sx,
-            -m.b * sy,
-             m.c * sx,
-            -m.d * sy,
+            m.a * sx,
+            m.b * sy,
+            m.c * sx,
+            m.d * sy,
             (m.e - bounds.minX) * sx,
-            (bounds.maxY - m.f) * sy
+            (m.f - bounds.minY) * sy
           );
         }
 
