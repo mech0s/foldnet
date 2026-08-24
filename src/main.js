@@ -65,6 +65,8 @@ class App {
     const studioPreviewContainer = document.getElementById('studio-preview-canvas-container');
     if (studioPreviewContainer) {
       this.studioPreviewRenderer = new FoldRenderer(studioPreviewContainer);
+      const themeSelect = document.getElementById('theme-select');
+      if (themeSelect) this.studioPreviewRenderer.setTheme(themeSelect.value);
     }
   }
 
@@ -253,6 +255,8 @@ class App {
     const previewContainer = document.getElementById('preview-canvas-container');
     if (previewContainer) {
       this.previewRenderer = new FoldRenderer(previewContainer);
+      const themeSelect = document.getElementById('theme-select');
+      if (themeSelect) this.previewRenderer.setTheme(themeSelect.value);
     }
   }
 
@@ -424,8 +428,17 @@ class App {
     // Theme selector
     const themeSelect = document.getElementById('theme-select');
     themeSelect.addEventListener('change', (e) => {
-      this.renderer.setTheme(e.target.value);
-      if (this.previewRenderer) this.previewRenderer.setTheme(e.target.value);
+      const themeKey = e.target.value;
+      if (this.renderer) this.renderer.setTheme(themeKey);
+      if (this.previewRenderer) this.previewRenderer.setTheme(themeKey);
+      if (this.studioPreviewRenderer) this.studioPreviewRenderer.setTheme(themeKey);
+      
+      // Re-apply existing artwork textures to keep graphics visible under new theme
+      if (this.graphicStudio && this.graphicStudio.faceArtworks) {
+        if (this.renderer) this.renderer.updateFaceArtworks(this.graphicStudio.faceArtworks);
+        if (this.previewRenderer) this.previewRenderer.updateFaceArtworks(this.graphicStudio.faceArtworks);
+        if (this.studioPreviewRenderer) this.studioPreviewRenderer.updateFaceArtworks(this.graphicStudio.faceArtworks);
+      }
     });
 
     // Play/Pause button
@@ -440,18 +453,15 @@ class App {
       this.animSpeed = parseFloat(e.target.value);
     });
 
-    // Camera preset buttons
-    document.getElementById('btn-view-2d').addEventListener('click', () => {
-      this.renderer.setView2D();
-    });
+    // Camera preset buttons (if present)
+    const btnView2D = document.getElementById('btn-view-2d');
+    if (btnView2D) btnView2D.addEventListener('click', () => this.renderer.setView2D());
 
-    document.getElementById('btn-view-3d').addEventListener('click', () => {
-      this.renderer.setView3D();
-    });
+    const btnView3D = document.getElementById('btn-view-3d');
+    if (btnView3D) btnView3D.addEventListener('click', () => this.renderer.setView3D());
 
-    document.getElementById('btn-reset-cam').addEventListener('click', () => {
-      this.renderer.centerModel();
-    });
+    const btnResetCam = document.getElementById('btn-reset-cam');
+    if (btnResetCam) btnResetCam.addEventListener('click', () => this.renderer.centerModel());
 
     // Inspector toggle
     const inspectorPanel = document.getElementById('inspector-panel');
