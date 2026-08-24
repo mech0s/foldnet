@@ -261,7 +261,7 @@ class App {
   }
 
   onNetEditorChange(foldJson) {
-    // Update live 3D preview sidebar with in-memory model
+    // 1. Update live 3D preview sidebar with in-memory model
     if (this.previewRenderer) {
       try {
         this.previewFoldData = parseFoldData(foldJson);
@@ -273,7 +273,27 @@ class App {
       }
     }
 
-    // Update JSON code panel textarea
+    // 2. Synchronize main 3D fold viewer and Graphic Studio models in real time
+    try {
+      this.foldData = parseFoldData(foldJson);
+      this.kinematics = new FoldKinematics(this.foldData);
+      if (this.renderer) {
+        this.renderer.buildModel(this.foldData, this.kinematics);
+        this.updateFoldProgress();
+      }
+      if (this.studioPreviewRenderer) {
+        this.studioPreviewRenderer.buildModel(this.foldData, this.kinematics);
+        this.updateStudioPreviewFoldProgress();
+      }
+      if (this.graphicStudio) {
+        this.graphicStudio.loadModel(this.foldData, this.kinematics, this.currentCadPlanarData ? this.currentCadPlanarData.dualGraph : null);
+      }
+      this.updateInspectorUI();
+    } catch (e) {
+      console.warn('Live fold sync warning:', e.message);
+    }
+
+    // 3. Update JSON code panel textarea
     const textarea = document.getElementById('json-code-textarea');
     if (textarea && document.activeElement !== textarea) {
       textarea.value = JSON.stringify(foldJson, null, 2);
@@ -529,6 +549,20 @@ class App {
     document.getElementById('btn-invert-folds').addEventListener('click', () => {
       if (this.netEditor) this.netEditor.invertFolds();
     });
+
+    const btnFlipV = document.getElementById('btn-flip-v');
+    if (btnFlipV) {
+      btnFlipV.addEventListener('click', () => {
+        if (this.netEditor) this.netEditor.flipVertically();
+      });
+    }
+
+    const btnFlipH = document.getElementById('btn-flip-h');
+    if (btnFlipH) {
+      btnFlipH.addEventListener('click', () => {
+        if (this.netEditor) this.netEditor.flipHorizontally();
+      });
+    }
 
     document.getElementById('btn-center-net').addEventListener('click', () => {
       if (this.netEditor) this.netEditor.centerView();

@@ -413,6 +413,54 @@ export class NetEditor {
     this.notifyChange();
   }
 
+  /** Flips the entire 2D net vertically across its bounding center. */
+  flipVertically() {
+    if (!this.foldData || !this.foldData.vertices_coords.length) return;
+
+    let minY = Infinity, maxY = -Infinity;
+    this.foldData.vertices_coords.forEach(c => {
+      if (c[1] < minY) minY = c[1];
+      if (c[1] > maxY) maxY = c[1];
+    });
+    const midY = (minY + maxY) / 2;
+
+    this.foldData.vertices_coords.forEach(c => {
+      c[1] = 2 * midY - c[1];
+    });
+
+    // Invert face vertex winding so normals stay consistent
+    if (this.foldData.faces_vertices) {
+      this.foldData.faces_vertices.forEach(fv => fv.reverse());
+    }
+
+    this.render();
+    this.notifyChange();
+  }
+
+  /** Flips the entire 2D net horizontally across its bounding center. */
+  flipHorizontally() {
+    if (!this.foldData || !this.foldData.vertices_coords.length) return;
+
+    let minX = Infinity, maxX = -Infinity;
+    this.foldData.vertices_coords.forEach(c => {
+      if (c[0] < minX) minX = c[0];
+      if (c[0] > maxX) maxX = c[0];
+    });
+    const midX = (minX + maxX) / 2;
+
+    this.foldData.vertices_coords.forEach(c => {
+      c[0] = 2 * midX - c[0];
+    });
+
+    // Invert face vertex winding so normals stay consistent
+    if (this.foldData.faces_vertices) {
+      this.foldData.faces_vertices.forEach(fv => fv.reverse());
+    }
+
+    this.render();
+    this.notifyChange();
+  }
+
   attachFaceToSelectedEdge() {
     if (this.selectedEdgeIndex >= 0) {
       this.attachFaceToEdge(this.selectedEdgeIndex);
