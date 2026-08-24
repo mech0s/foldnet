@@ -249,13 +249,19 @@ export class NetEditor {
   }
 
   resizeCanvas() {
+    const prevW = this.canvas.width;
+    const prevH = this.canvas.height;
     this.canvas.width = this.container.clientWidth;
     this.canvas.height = this.container.clientHeight;
+    // If canvas had 0 dimensions previously (e.g. loaded while tab was hidden), auto-fit now
+    if ((prevW === 0 || prevH === 0) && this.canvas.width > 0 && this.canvas.height > 0) {
+      this.centerView();
+    }
     this.render();
   }
 
   centerView() {
-    if (!this.foldData || this.foldData.vertices_coords.length === 0) return;
+    if (!this.foldData || !this.foldData.vertices_coords || this.foldData.vertices_coords.length === 0) return;
 
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
     this.foldData.vertices_coords.forEach(v => {
@@ -267,15 +273,21 @@ export class NetEditor {
 
     const centerX = (minX + maxX) / 2;
     const centerY = (minY + maxY) / 2;
-    const width = maxX - minX || 2;
-    const height = maxY - minY || 2;
+    const width = Math.max(maxX - minX, 0.01);
+    const height = Math.max(maxY - minY, 0.01);
 
-    const scaleX = (this.canvas.width * 0.7) / width;
-    const scaleY = (this.canvas.height * 0.7) / height;
-    this.zoom = Math.min(Math.max(Math.min(scaleX, scaleY), 0.05), 300);
+    const cWidth = this.canvas.width || this.container.clientWidth || 800;
+    const cHeight = this.canvas.height || this.container.clientHeight || 600;
 
-    this.panX = this.canvas.width / 2 - centerX * this.zoom;
-    this.panY = this.canvas.height / 2 + centerY * this.zoom;
+    const scaleX = (cWidth * 0.75) / width;
+    const scaleY = (cHeight * 0.75) / height;
+    // Auto-fit zoom to frame model comfortably across any units
+    this.zoom = Math.min(scaleX, scaleY);
+    if (!Number.isFinite(this.zoom) || this.zoom <= 0) this.zoom = 60;
+
+    this.panX = cWidth / 2 - centerX * this.zoom;
+    this.panY = cHeight / 2 + centerY * this.zoom;
+    this.render();
   }
 
   screenToWorld(sx, sy) {

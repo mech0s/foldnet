@@ -344,7 +344,10 @@ class App {
     btnMode3D.addEventListener('click', () => switchWorkspace(btnMode3D, viewerWorkspace));
     btnModeEditor.addEventListener('click', () => {
       switchWorkspace(btnModeEditor, editorWorkspace);
-      if (this.netEditor) this.netEditor.resizeCanvas();
+      if (this.netEditor) {
+        this.netEditor.resizeCanvas();
+        this.netEditor.centerView();
+      }
       if (this.previewRenderer) this.previewRenderer.resize();
     });
     if (btnModeStudio) {
