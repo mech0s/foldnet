@@ -247,8 +247,56 @@ export class GraphicStudio {
 
     this.faceAdjacency3D = CrossSeamMapper.build3DAdjacency(foldData, kinematics, cadDualGraph);
     this.focusFaceIndex = 0;
+    this.panX = 0;
+    this.panY = 0;
+    this.autoFitZoom();
     this.updateClusterView();
     this.updateNavigator();
+  }
+
+  /**
+   * [IN-PROGRESS / SCALING STRATEGY]:
+   * Automatically computes the initial viewport zoom and coordinate unit scale based on the model's physical/CAD bounds.
+   * 
+   * Strategy Note:
+   * Models can arrive in unit coordinates (e.g. unit cube 1.0x1.0), inches (10x10), or millimeters (250x250).
+   * - `targetFacePx`: Target visual pixel size on screen for an average face.
+   * - `modelUnitScale`: Normalizes tool properties (stroke width, text font size, stamp dimensions) to coordinate units.
+   * Alternative strategies to consider:
+   * 1. Per-face bounding box normalization (scaling each element as % of active face width/height).
+   * 2. Viewport-independent fixed screen-space pixel sizing with inverse zoom transforms.
+   */
+  autoFitZoom() {
+    if (!this.foldData || !this.foldData.vertices || this.foldData.vertices.length === 0) return;
+    
+    // Compute total net bounding size to determine model scale
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    this.foldData.vertices.forEach(p => {
+      if (p[0] < minX) minX = p[0];
+      if (p[0] > maxX) maxX = p[0];
+      if (p[1] < minY) minY = p[1];
+      if (p[1] > maxY) maxY = p[1];
+    });
+
+    const netW = Math.max(maxX - minX, 0.01);
+    const netH = Math.max(maxY - minY, 0.01);
+    const maxDim = Math.max(netW, netH);
+
+    // Calculate approximate focus face diameter
+    const numFaces = this.foldData.facesVertices.length || 1;
+    const approxFaceDim = Math.max(maxDim / Math.sqrt(numFaces), 0.01);
+
+    // Target around 250px on screen for a standard face in cluster view
+    const targetFacePx = 250;
+    const computedZoom = targetFacePx / approxFaceDim;
+
+    // Unit scale for drawing artwork, stamps, and labels (approxFaceDim / 100.0 is calibrated against ~100mm CAD default)
+    this.modelUnitScale = approxFaceDim / 100.0;
+
+    // Set zoom safely clamped across large CAD units (e.g. 500mm) and tiny units (e.g. unit cube = 1.0)
+    this.zoom = Math.max(0.01, Math.min(2000.0, computedZoom));
+    this.minZoom = this.zoom * 0.05;
+    this.maxZoom = this.zoom * 50.0;
   }
 
   setFocusFace(faceIdx) {
@@ -314,7 +362,7 @@ export class GraphicStudio {
 
       this.rootGroup.appendChild(poly);
 
-      // Face label
+      // Face label (scaled relative to zoom so it remains legible regardless of coordinate unit scale)
       let fcx = 0, fcy = 0;
       f.polygon.forEach(p => { fcx += p[0]; fcy += p[1]; });
       fcx /= f.polygon.length;
@@ -324,6 +372,8 @@ export class GraphicStudio {
       text.setAttribute('x', fcx);
       text.setAttribute('y', fcy);
       text.setAttribute('class', 'face-id-label');
+      const fontSizeInCoordUnits = Math.max(0.001, 14 / (this.zoom || 1));
+      text.setAttribute('font-size', `${fontSizeInCoordUnits}px`);
       text.textContent = f.isFocus ? `F${f.faceIndex} (Focus)` : `F${f.faceIndex}`;
       this.rootGroup.appendChild(text);
     });
@@ -368,8 +418,17 @@ export class GraphicStudio {
     });
   }
 
+  /**
+   * [IN-PROGRESS / SCALING STRATEGY]:
+   * Instantiates SVG elements from specs.
+   * Tool parameters (stroke width, font size, stamp sizes) are multiplied by `unitScale`
+   * so they scale appropriately with the model's coordinate system.
+   * `vector-effect="non-scaling-stroke"` ensures consistent on-screen line thickness.
+   */
   createSVGElementFromSpec(spec, faceClusterInfo) {
     let elem = null;
+    const unitScale = this.modelUnitScale || 1;
+
     if (spec.type === 'rect') {
       elem = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
       elem.setAttribute('x', spec.x);
@@ -385,7 +444,7 @@ export class GraphicStudio {
       elem = document.createElementNS('http://www.w3.org/2000/svg', 'text');
       elem.setAttribute('x', spec.x);
       elem.setAttribute('y', spec.y);
-      elem.setAttribute('font-size', spec.fontSize || 20);
+      elem.setAttribute('font-size', (spec.fontSize || 24) * unitScale);
       elem.setAttribute('font-weight', 'bold');
       elem.setAttribute('font-family', 'sans-serif');
       elem.textContent = spec.text;
@@ -396,34 +455,38 @@ export class GraphicStudio {
     if (elem) {
       elem.setAttribute('fill', spec.fill || 'transparent');
       elem.setAttribute('stroke', spec.stroke || 'none');
-      elem.setAttribute('stroke-width', spec.strokeWidth || 1);
+      // When vector-effect="non-scaling-stroke" is active, stroke-width represents screen pixels directly
+      elem.setAttribute('stroke-width', `${spec.strokeWidth || 2}px`);
+      elem.setAttribute('vector-effect', 'non-scaling-stroke');
       elem.setAttribute('class', 'artwork-element');
     }
     return elem;
   }
 
   createStampElement(spec) {
+    const unitScale = this.modelUnitScale || 1;
     const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-    g.setAttribute('transform', `translate(${spec.x}, ${spec.y}) scale(${spec.scale || 1})`);
+    const scaleFactor = (spec.scale || 1) * unitScale;
+    g.setAttribute('transform', `translate(${spec.x}, ${spec.y}) scale(${scaleFactor})`);
     
     if (spec.stampType === 'fragile') {
       g.innerHTML = `
-        <rect width="60" height="40" rx="4" fill="#ef4444" stroke="#ffffff" stroke-width="2" />
+        <rect width="60" height="40" rx="4" fill="#ef4444" stroke="#ffffff" stroke-width="2" vector-effect="non-scaling-stroke" />
         <text x="30" y="24" fill="#ffffff" font-size="10" font-weight="bold" text-anchor="middle" font-family="sans-serif">FRAGILE</text>
       `;
     } else if (spec.stampType === 'up') {
       g.innerHTML = `
-        <rect width="40" height="50" rx="4" fill="#3b82f6" stroke="#ffffff" stroke-width="2" />
+        <rect width="40" height="50" rx="4" fill="#3b82f6" stroke="#ffffff" stroke-width="2" vector-effect="non-scaling-stroke" />
         <path d="M20 12 L10 24 L16 24 L16 38 L24 38 L24 24 L30 24 Z" fill="#ffffff" />
       `;
     } else if (spec.stampType === 'recycle') {
       g.innerHTML = `
-        <circle cx="25" cy="25" r="22" fill="#10b981" stroke="#ffffff" stroke-width="2" />
+        <circle cx="25" cy="25" r="22" fill="#10b981" stroke="#ffffff" stroke-width="2" vector-effect="non-scaling-stroke" />
         <text x="25" y="30" fill="#ffffff" font-size="16" text-anchor="middle">♻</text>
       `;
     } else if (spec.stampType === 'barcode') {
       g.innerHTML = `
-        <rect width="70" height="40" fill="#ffffff" stroke="#000000" stroke-width="1" />
+        <rect width="70" height="40" fill="#ffffff" stroke="#000000" stroke-width="1" vector-effect="non-scaling-stroke" />
         <line x1="10" y1="8" x2="10" y2="32" stroke="#000" stroke-width="3" />
         <line x1="18" y1="8" x2="18" y2="32" stroke="#000" stroke-width="1" />
         <line x1="24" y1="8" x2="24" y2="32" stroke="#000" stroke-width="4" />
@@ -434,7 +497,7 @@ export class GraphicStudio {
       `;
     } else {
       g.innerHTML = `
-        <polygon points="25,5 31,18 45,18 34,27 38,40 25,32 12,40 16,27 5,18 19,18" fill="#f59e0b" stroke="#ffffff" stroke-width="1" />
+        <polygon points="25,5 31,18 45,18 34,27 38,40 25,32 12,40 16,27 5,18 19,18" fill="#f59e0b" stroke="#ffffff" stroke-width="1" vector-effect="non-scaling-stroke" />
       `;
     }
     return g;
@@ -459,6 +522,7 @@ export class GraphicStudio {
     }
 
     const pos = this.getCanvasCoords(e);
+    const unitScale = this.modelUnitScale || 1;
     this.isDrawing = true;
     this.drawStart = pos;
 
@@ -466,9 +530,10 @@ export class GraphicStudio {
       const spec = {
         type: 'stamp',
         stampType: this.activeStamp,
-        x: pos.x - 30,
-        y: pos.y - 20,
+        x: pos.x - 30 * unitScale,
+        y: pos.y - 20 * unitScale,
         scale: 1,
+        unitScale: unitScale,
         faceIndex: this.focusFaceIndex
       };
       this.addArtwork(spec);
@@ -480,6 +545,7 @@ export class GraphicStudio {
         x: pos.x,
         y: pos.y,
         fontSize: this.fontSize,
+        unitScale: unitScale,
         fill: this.fillColor,
         stroke: this.strokeColor,
         strokeWidth: this.strokeWidth,
@@ -500,6 +566,7 @@ export class GraphicStudio {
 
     if (!this.isDrawing || !this.drawStart) return;
     const pos = this.getCanvasCoords(e);
+    const unitScale = this.modelUnitScale || 1;
 
     // Live preview during drag
     let previewElem = this.rootGroup.querySelector('#draw-preview');
@@ -508,7 +575,8 @@ export class GraphicStudio {
       previewElem.setAttribute('id', 'draw-preview');
       previewElem.setAttribute('fill', this.fillColor);
       previewElem.setAttribute('stroke', this.strokeColor);
-      previewElem.setAttribute('stroke-width', this.strokeWidth);
+      previewElem.setAttribute('stroke-width', `${this.strokeWidth || 2}px`);
+      previewElem.setAttribute('vector-effect', 'non-scaling-stroke');
       previewElem.setAttribute('opacity', '0.6');
       this.rootGroup.appendChild(previewElem);
     }
@@ -538,6 +606,7 @@ export class GraphicStudio {
 
     if (!this.isDrawing || !this.drawStart) return;
     const pos = this.getCanvasCoords(e);
+    const unitScale = this.modelUnitScale || 1;
     this.isDrawing = false;
 
     const previewElem = this.rootGroup.querySelector('#draw-preview');
@@ -546,7 +615,8 @@ export class GraphicStudio {
     if (this.activeTool === 'rect') {
       const w = Math.abs(pos.x - this.drawStart.x);
       const h = Math.abs(pos.y - this.drawStart.y);
-      if (w > 3 && h > 3) {
+      // Min threshold scaled to coordinate units
+      if (w > 0.01 * unitScale && h > 0.01 * unitScale) {
         const spec = {
           type: 'rect',
           x: Math.min(this.drawStart.x, pos.x),
@@ -556,13 +626,14 @@ export class GraphicStudio {
           fill: this.fillColor,
           stroke: this.strokeColor,
           strokeWidth: this.strokeWidth,
+          unitScale: unitScale,
           faceIndex: this.focusFaceIndex
         };
         this.addArtwork(spec);
       }
     } else if (this.activeTool === 'circle') {
       const r = Math.hypot(pos.x - this.drawStart.x, pos.y - this.drawStart.y);
-      if (r > 3) {
+      if (r > 0.01 * unitScale) {
         const spec = {
           type: 'circle',
           cx: this.drawStart.x,
@@ -571,6 +642,7 @@ export class GraphicStudio {
           fill: this.fillColor,
           stroke: this.strokeColor,
           strokeWidth: this.strokeWidth,
+          unitScale: unitScale,
           faceIndex: this.focusFaceIndex
         };
         this.addArtwork(spec);
@@ -581,7 +653,9 @@ export class GraphicStudio {
   onWheel(e) {
     e.preventDefault();
     const zoomFactor = e.deltaY < 0 ? 1.15 : 0.85;
-    this.zoom = Math.max(0.4, Math.min(6.0, this.zoom * zoomFactor));
+    const minZ = this.minZoom || 0.01;
+    const maxZ = this.maxZoom || 5000.0;
+    this.zoom = Math.max(minZ, Math.min(maxZ, this.zoom * zoomFactor));
     this.renderClusterSVG();
   }
 
@@ -591,6 +665,7 @@ export class GraphicStudio {
 
   /** Bounding box {minX, minY, maxX, maxY} of an artwork spec in cluster space. */
   getArtworkBBox(spec) {
+    const unitScale = spec.unitScale || this.modelUnitScale || 1;
     if (spec.type === 'rect') {
       return { minX: spec.x, minY: spec.y, maxX: spec.x + spec.width, maxY: spec.y + spec.height };
     }
@@ -598,13 +673,16 @@ export class GraphicStudio {
       return { minX: spec.cx - spec.r, minY: spec.cy - spec.r, maxX: spec.cx + spec.r, maxY: spec.cy + spec.r };
     }
     if (spec.type === 'text') {
-      const estW = (spec.text || '').length * (spec.fontSize || 24) * 0.6;
-      return { minX: spec.x - 5, minY: spec.y - (spec.fontSize || 24), maxX: spec.x + estW, maxY: spec.y + 5 };
+      const estW = (spec.text || '').length * (spec.fontSize || 24) * 0.6 * unitScale;
+      const h = (spec.fontSize || 24) * unitScale;
+      return { minX: spec.x - 5 * unitScale, minY: spec.y - h, maxX: spec.x + estW, maxY: spec.y + 5 * unitScale };
     }
     if (spec.type === 'stamp') {
       const sizes = { fragile: [60, 40], up: [40, 50], recycle: [50, 50], barcode: [70, 40], star: [50, 50] };
       const [w, h] = sizes[spec.stampType] || [60, 40];
-      return { minX: spec.x, minY: spec.y, maxX: spec.x + w, maxY: spec.y + h };
+      const sw = w * unitScale;
+      const sh = h * unitScale;
+      return { minX: spec.x, minY: spec.y, maxX: spec.x + sw, maxY: spec.y + sh };
     }
     return { minX: -1e9, minY: -1e9, maxX: 1e9, maxY: 1e9 };
   }

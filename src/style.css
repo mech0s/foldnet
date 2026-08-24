@@ -1183,20 +1183,23 @@ body {
 
 /* SVG Cluster Elements Styling */
 .cluster-face {
-  stroke-width: 1.5;
+  stroke-width: 1.5px;
+  vector-effect: non-scaling-stroke;
   transition: opacity 0.15s ease;
 }
 
 .cluster-face.focus {
   fill: rgba(255, 234, 0, 0.15);
   stroke: #ffea00;
-  stroke-width: 2;
+  stroke-width: 2px;
+  vector-effect: non-scaling-stroke;
 }
 
 .cluster-face.neighbor {
   fill: rgba(59, 130, 246, 0.08);
   stroke: rgba(255, 255, 255, 0.4);
   cursor: pointer;
+  vector-effect: non-scaling-stroke;
 }
 
 .cluster-face.neighbor:hover {
@@ -1206,9 +1209,8 @@ body {
 
 .face-id-label {
   font-family: var(--font-sans);
-  font-size: 10px;
   font-weight: 600;
-  fill: rgba(255, 255, 255, 0.7);
+  fill: rgba(255, 255, 255, 0.85);
   text-anchor: middle;
   dominant-baseline: middle;
   pointer-events: none;
@@ -1216,15 +1218,17 @@ body {
 
 .cluster-crease.fold {
   stroke: #3b82f6;
-  stroke-width: 2.5;
+  stroke-width: 2.5px;
   stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
 }
 
 .cluster-crease.cut-seam {
   stroke: #f97316;
-  stroke-width: 2;
+  stroke-width: 2px;
   stroke-dasharray: 4, 3;
   stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
 }
 
 /* Mini Map Navigator */
@@ -1253,8 +1257,9 @@ body {
 
 .nav-face {
   fill: rgba(255, 255, 255, 0.1);
-  stroke: rgba(255, 255, 255, 0.3);
-  stroke-width: 1;
+  stroke: rgba(255, 255, 255, 0.35);
+  stroke-width: 1px;
+  vector-effect: non-scaling-stroke;
   cursor: pointer;
   transition: all 0.15s ease;
 }
@@ -1262,11 +1267,15 @@ body {
 .nav-face:hover {
   fill: rgba(59, 130, 246, 0.4);
   stroke: #60a5fa;
+  stroke-width: 1.5px;
+  vector-effect: non-scaling-stroke;
 }
 
 .nav-face.focus {
   fill: #ffea00;
   stroke: #ffffff;
+  stroke-width: 1.5px;
+  vector-effect: non-scaling-stroke;
 }
 
 
