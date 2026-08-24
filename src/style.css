@@ -1210,21 +1210,28 @@ body {
 }
 
 .cluster-face.focus {
-  fill: rgba(255, 234, 0, 0.15);
-  stroke: #ffea00;
+  fill: #1e293b;
+  stroke: #38bdf8;
   stroke-width: 2px;
-  vector-effect: non-scaling-stroke;
+}
+
+.cluster-face.coplanar {
+  fill: #1a2234;
+  stroke: #60a5fa;
+  stroke-width: 1.5px;
+  stroke-dasharray: 4 2;
+  cursor: pointer;
 }
 
 .cluster-face.neighbor {
   fill: rgba(59, 130, 246, 0.08);
   stroke: rgba(255, 255, 255, 0.4);
   cursor: pointer;
-  vector-effect: non-scaling-stroke;
 }
 
-.cluster-face.neighbor:hover {
-  fill: rgba(59, 130, 246, 0.2);
+.cluster-face.neighbor:hover,
+.cluster-face.coplanar:hover {
+  fill: rgba(59, 130, 246, 0.25);
   stroke: #60a5fa;
 }
 

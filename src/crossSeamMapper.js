@@ -31,6 +31,18 @@ export class CrossSeamMapper {
       });
     });
 
+    // Compute unit normal for each face in 3D folded space
+    const faceNormals3D = faceWorldVerts3D.map(verts => {
+      if (verts.length < 3) return new THREE.Vector3(0, 0, 1);
+      const v0 = verts[0], v1 = verts[1], v2 = verts[2];
+      const cb = new THREE.Vector3().subVectors(v2, v1);
+      const ab = new THREE.Vector3().subVectors(v0, v1);
+      cb.cross(ab);
+      if (cb.lengthSq() > 1e-6) cb.normalize();
+      else cb.set(0, 0, 1);
+      return cb;
+    });
+
     // Collect all directed 3D edge segments across all faces
     const edgeSegments = [];
     faceWorldVerts3D.forEach((verts, fIdx) => {
@@ -73,13 +85,19 @@ export class CrossSeamMapper {
           if (dOpp < tol * 2 || dSame < tol * 2) {
             const isOpposite = dOpp <= dSame;
 
+            // Check if faces are co-planar in 3D folded space (dot product of 3D normals ≈ 1.0)
+            const n0 = faceNormals3D[e0.faceIndex];
+            const n1 = faceNormals3D[e1.faceIndex];
+            const isCoPlanar = n0.dot(n1) > 0.98;
+
             faceAdjacency3D[e0.faceIndex].push({
               neighborFace: e1.faceIndex,
               edgeIndexInFace: e0.edgeIndexInFace,
               v1_2D: e0.v1_2D,
               v2_2D: e0.v2_2D,
               neighborEdgeIndex: e1.edgeIndexInFace,
-              isOpposite
+              isOpposite,
+              isCoPlanar
             });
 
             faceAdjacency3D[e1.faceIndex].push({
@@ -88,7 +106,8 @@ export class CrossSeamMapper {
               v1_2D: e1.v1_2D,
               v2_2D: e1.v2_2D,
               neighborEdgeIndex: e0.edgeIndexInFace,
-              isOpposite
+              isOpposite,
+              isCoPlanar
             });
           }
         }
@@ -102,26 +121,19 @@ export class CrossSeamMapper {
    * Builds the local 2D cluster layout for a given focus face F0.
    * Focus face F0 is placed centered at (0, 0).
    * 
-   * [CARDINAL MULTI-DEPTH UNPACKING]:
-   * - Each edge of F0 initiates a distinct cardinal branch (e.g. Up, Down, Left, Right).
-   * - Breadth-First expansion proceeds "onwards and upwards" along the opposite edge of each face.
-   * - Traversal stops if a candidate face is already claimed by a different cardinal branch (or by F0).
-   * 
-   * [NOTE ON ORTHOGONAL / LATERAL BRANCHING]:
-   * In full 2D expansion, an upward branch might attempt to expand Left & Right, and a Left branch
-   * might attempt to expand Up. This would cause a geometric 2D overlap (e.g. Left->Up colliding with Up->Left).
-   * For cardinal unpacking, lateral edges are skipped so each branch stays on its straight trajectory.
-   * If orthogonal branching is enabled in the future, a 2D polygon intersection test and precedence rule
-   * (e.g., shortest geodesic distance from F0 or crease-angle precedence) must be applied.
+   * [CO-PLANAR ISLAND + CARDINAL RAYS UNPACKING]:
+   * 1. Tier 1 (Co-Planar Island): Expands in ALL directions across connected 3D co-planar
+   *    adjacent faces (fold angle = 0°, normal dot product ≈ 1.0) without distortion or false adjacency.
+   * 2. Tier 2 (Cardinal Rays): From the perimeter edges of the co-planar island, straight cardinal
+   *    rays expand "onwards and upwards" across 3D hinges up to `maxDepth`.
+   * 3. Prevents lateral overlap/ambiguity while showing full flat segmented face assemblies.
    */
   static buildNeighborCluster(focusFaceIdx, foldData, faceAdjacency3D, maxDepth = 4) {
-    const focusFaceVerts2D = foldData.facesVertices[focusFaceIdx];
     const origCoords = foldData.vertices;
-
-    // Get 2D coordinates of focus face
-    const f0Coords2D = focusFaceVerts2D.map(vIdx => origCoords[vIdx]);
+    const focusFaceVerts2D = foldData.facesVertices[focusFaceIdx];
 
     // Compute centroid of F0 to center at (0,0)
+    const f0Coords2D = focusFaceVerts2D.map(vIdx => origCoords[vIdx]);
     let cx = 0, cy = 0;
     f0Coords2D.forEach(p => { cx += p[0]; cy += p[1]; });
     cx /= f0Coords2D.length;
@@ -130,101 +142,204 @@ export class CrossSeamMapper {
     // Centered F0 local coordinates
     const localF0 = f0Coords2D.map(p => [p[0] - cx, p[1] - cy]);
 
-    const clusterFaces = [
-      {
-        faceIndex: focusFaceIdx,
-        isFocus: true,
-        polygon: localF0,
-        origPolygon2D: f0Coords2D,
-        branchId: -1,
-        depth: 0,
-        transformToNet: { tx: cx, ty: cy, rot: 0, scale: 1 },
-        clusterToNet: { a: 1, b: 0, c: 0, d: 1, e: cx, f: cy },
-        netToCluster: { a: 1, b: 0, c: 0, d: 1, e: -cx, f: -cy }
-      }
-    ];
-
+    const clusterFaces = [];
     const clusterEdges = [];
-    // Visited map: faceIndex -> branchId
+
+    // Visited map: faceIndex -> { branchId, depth, isCoPlanarWithFocus }
     const visitedFaces = new Map();
-    visitedFaces.set(focusFaceIdx, -1);
 
-    // BFS Queue for cardinal branch expansion: Array<{ faceIndex, localPolygon, entryEdgeIndex, branchId, depth }>
-    const queue = [];
-    const lenF0 = focusFaceVerts2D.length;
-    const f0Neighbors = faceAdjacency3D[focusFaceIdx] || [];
+    // ────────────────────────────────────────────────────────────
+    // TIER 1: Full Expansion of Co-Planar Island around F0
+    // ────────────────────────────────────────────────────────────
+    const coPlanarQueue = [{
+      faceIndex: focusFaceIdx,
+      isFocus: true,
+      polygon: localF0,
+      origPolygon2D: f0Coords2D
+    }];
 
-    // 1. Initialize Cardinal Branches directly from F0 edges (Depth 1)
-    for (let i = 0; i < lenF0; i++) {
-      const v1 = focusFaceVerts2D[i];
-      const v2 = focusFaceVerts2D[(i + 1) % lenF0];
-      const p1Local = localF0[i];
-      const p2Local = localF0[(i + 1) % lenF0];
+    visitedFaces.set(focusFaceIdx, { branchId: -1, depth: 0, isCoPlanarWithFocus: true });
 
-      const neighborEntry = f0Neighbors.find(n => n.edgeIndexInFace === i);
+    clusterFaces.push({
+      faceIndex: focusFaceIdx,
+      isFocus: true,
+      polygon: localF0,
+      origPolygon2D: f0Coords2D,
+      branchId: -1,
+      depth: 0,
+      isCoPlanarWithFocus: true,
+      transformToNet: { tx: cx, ty: cy, rot: 0, scale: 1 },
+      clusterToNet: { a: 1, b: 0, c: 0, d: 1, e: cx, f: cy },
+      netToCluster: { a: 1, b: 0, c: 0, d: 1, e: -cx, f: -cy }
+    });
 
-      const key2D = `${Math.min(v1, v2)}-${Math.max(v1, v2)}`;
-      const edgeIdx2D = foldData.edgeLookup ? foldData.edgeLookup.get(key2D) : -1;
-      const assign = edgeIdx2D >= 0 ? (foldData.edgesAssignment[edgeIdx2D] || 'C') : 'C';
-      const isFoldHinge = (assign === 'V' || assign === 'M' || assign === 'F');
+    while (coPlanarQueue.length > 0) {
+      const parent = coPlanarQueue.shift();
+      const pIdx = parent.faceIndex;
+      const pVerts2D = foldData.facesVertices[pIdx];
+      const pLen = pVerts2D.length;
+      const neighbors = faceAdjacency3D[pIdx] || [];
 
-      clusterEdges.push({
-        edgeIndex: i,
-        v1,
-        v2,
-        p1: p1Local,
-        p2: p2Local,
-        isFoldHinge,
-        assignment: assign,
-        hasNeighbor: !!neighborEntry,
-        neighborFace: neighborEntry ? neighborEntry.neighborFace : null
-      });
+      for (let i = 0; i < pLen; i++) {
+        const neighborEntry = neighbors.find(n => n.edgeIndexInFace === i);
+        if (!neighborEntry || !neighborEntry.isCoPlanar) continue;
 
-      if (neighborEntry) {
         const nFaceIdx = neighborEntry.neighborFace;
-        if (!visitedFaces.has(nFaceIdx) && maxDepth >= 1) {
-          visitedFaces.set(nFaceIdx, i); // Claimed by branch `i`
+        if (visitedFaces.has(nFaceIdx)) continue;
 
-          const nFaceVerts2D = foldData.facesVertices[nFaceIdx];
-          const nOrigCoords = nFaceVerts2D.map(vIdx => origCoords[vIdx]);
-          const isOpposite = neighborEntry.isOpposite !== undefined ? neighborEntry.isOpposite : true;
+        visitedFaces.set(nFaceIdx, { branchId: -1, depth: 0, isCoPlanarWithFocus: true });
 
-          const nLocalPolygon = this.alignNeighborFaceToEdge(
-            nOrigCoords,
-            neighborEntry.neighborEdgeIndex,
-            p1Local,
-            p2Local,
-            isOpposite
-          );
+        const p1Local = parent.polygon[i];
+        const p2Local = parent.polygon[(i + 1) % pLen];
 
-          clusterFaces.push({
-            faceIndex: nFaceIdx,
-            isFocus: false,
-            polygon: nLocalPolygon,
-            origPolygon2D: nOrigCoords,
-            sharedEdgeIndex: i,
-            branchId: i,
-            depth: 1,
+        const nFaceVerts2D = foldData.facesVertices[nFaceIdx];
+        const nOrigCoords = nFaceVerts2D.map(vIdx => origCoords[vIdx]);
+        const isOpposite = neighborEntry.isOpposite !== undefined ? neighborEntry.isOpposite : true;
+
+        const nLocalPolygon = this.alignNeighborFaceToEdge(
+          nOrigCoords,
+          neighborEntry.neighborEdgeIndex,
+          p1Local,
+          p2Local,
+          isOpposite
+        );
+
+        // Record interior flat edge
+        const v1 = pVerts2D[i];
+        const v2 = pVerts2D[(i + 1) % pLen];
+        const key2D = `${Math.min(v1, v2)}-${Math.max(v1, v2)}`;
+        const edgeIdx2D = foldData.edgeLookup ? foldData.edgeLookup.get(key2D) : -1;
+        const assign = edgeIdx2D >= 0 ? (foldData.edgesAssignment[edgeIdx2D] || 'F') : 'F';
+
+        clusterEdges.push({
+          edgeIndex: i,
+          v1,
+          v2,
+          p1: p1Local,
+          p2: p2Local,
+          isFoldHinge: true,
+          assignment: assign,
+          hasNeighbor: true,
+          neighborFace: nFaceIdx
+        });
+
+        const newFaceItem = {
+          faceIndex: nFaceIdx,
+          isFocus: false,
+          polygon: nLocalPolygon,
+          origPolygon2D: nOrigCoords,
+          branchId: -1,
+          depth: 0,
+          isCoPlanarWithFocus: true,
+          isFoldHinge: true,
+          clusterToNet: CrossSeamMapper.computeRigidAffine(nLocalPolygon, nOrigCoords),
+          netToCluster: CrossSeamMapper.computeRigidAffine(nOrigCoords, nLocalPolygon)
+        };
+
+        clusterFaces.push(newFaceItem);
+        coPlanarQueue.push(newFaceItem);
+      }
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // TIER 2: Cardinal Rays Emitters from Island Perimeter
+    // ────────────────────────────────────────────────────────────
+    const cardinalQueue = [];
+    let branchCounter = 0;
+
+    // Collect all exterior perimeter edges of the co-planar island
+    for (const islandFace of clusterFaces) {
+      const fIdx = islandFace.faceIndex;
+      const fVerts2D = foldData.facesVertices[fIdx];
+      const fLen = fVerts2D.length;
+      const neighbors = faceAdjacency3D[fIdx] || [];
+
+      for (let i = 0; i < fLen; i++) {
+        const neighborEntry = neighbors.find(n => n.edgeIndexInFace === i);
+        const p1Local = islandFace.polygon[i];
+        const p2Local = islandFace.polygon[(i + 1) % fLen];
+        const v1 = fVerts2D[i];
+        const v2 = fVerts2D[(i + 1) % fLen];
+
+        const key2D = `${Math.min(v1, v2)}-${Math.max(v1, v2)}`;
+        const edgeIdx2D = foldData.edgeLookup ? foldData.edgeLookup.get(key2D) : -1;
+        const assign = edgeIdx2D >= 0 ? (foldData.edgesAssignment[edgeIdx2D] || 'C') : 'C';
+        const isFoldHinge = (assign === 'V' || assign === 'M' || assign === 'F');
+
+        // Only emit cardinal rays across non-coplanar hinges / seams
+        if (neighborEntry && !neighborEntry.isCoPlanar) {
+          const nFaceIdx = neighborEntry.neighborFace;
+
+          clusterEdges.push({
+            edgeIndex: i,
+            v1,
+            v2,
+            p1: p1Local,
+            p2: p2Local,
             isFoldHinge,
-            clusterToNet: CrossSeamMapper.computeRigidAffine(nLocalPolygon, nOrigCoords),
-            netToCluster: CrossSeamMapper.computeRigidAffine(nOrigCoords, nLocalPolygon)
+            assignment: assign,
+            hasNeighbor: true,
+            neighborFace: nFaceIdx
           });
 
-          // Queue for cardinal forward expansion
-          queue.push({
-            faceIndex: nFaceIdx,
-            localPolygon: nLocalPolygon,
-            entryEdgeIndex: neighborEntry.neighborEdgeIndex,
-            branchId: i,
-            depth: 1
+          if (!visitedFaces.has(nFaceIdx) && maxDepth >= 1) {
+            const branchId = branchCounter++;
+            visitedFaces.set(nFaceIdx, { branchId, depth: 1, isCoPlanarWithFocus: false });
+
+            const nFaceVerts2D = foldData.facesVertices[nFaceIdx];
+            const nOrigCoords = nFaceVerts2D.map(vIdx => origCoords[vIdx]);
+            const isOpposite = neighborEntry.isOpposite !== undefined ? neighborEntry.isOpposite : true;
+
+            const nLocalPolygon = this.alignNeighborFaceToEdge(
+              nOrigCoords,
+              neighborEntry.neighborEdgeIndex,
+              p1Local,
+              p2Local,
+              isOpposite
+            );
+
+            clusterFaces.push({
+              faceIndex: nFaceIdx,
+              isFocus: false,
+              polygon: nLocalPolygon,
+              origPolygon2D: nOrigCoords,
+              sharedEdgeIndex: i,
+              branchId,
+              depth: 1,
+              isCoPlanarWithFocus: false,
+              isFoldHinge,
+              clusterToNet: CrossSeamMapper.computeRigidAffine(nLocalPolygon, nOrigCoords),
+              netToCluster: CrossSeamMapper.computeRigidAffine(nOrigCoords, nLocalPolygon)
+            });
+
+            cardinalQueue.push({
+              faceIndex: nFaceIdx,
+              localPolygon: nLocalPolygon,
+              entryEdgeIndex: neighborEntry.neighborEdgeIndex,
+              branchId,
+              depth: 1
+            });
+          }
+        } else if (!neighborEntry) {
+          // Boundary / non-connected cut edge
+          clusterEdges.push({
+            edgeIndex: i,
+            v1,
+            v2,
+            p1: p1Local,
+            p2: p2Local,
+            isFoldHinge,
+            assignment: assign,
+            hasNeighbor: false,
+            neighborFace: null
           });
         }
       }
     }
 
-    // 2. Breadth-First Cardinal Propagation (Depth >= 2)
-    while (queue.length > 0) {
-      const current = queue.shift();
+    // Propagate Cardinal Rays Breadth-First (Depth >= 2)
+    while (cardinalQueue.length > 0) {
+      const current = cardinalQueue.shift();
       if (current.depth >= maxDepth) continue;
 
       const currFaceIdx = current.faceIndex;
@@ -232,89 +347,73 @@ export class CrossSeamMapper {
       const numVerts = currFaceVerts2D.length;
       const currNeighbors = faceAdjacency3D[currFaceIdx] || [];
 
-      // Find the cardinal "opposite" edge (onwards and upwards along current branch trajectory)
-      // For a quad (4 verts), opposite of entryEdgeIndex is (entryEdgeIndex + 2) % 4
-      // For general N-gon, opposite is (entryEdgeIndex + Math.floor(N/2)) % N
+      // Forward cardinal step: exit through opposite edge
       const oppositeEdgeIdx = (current.entryEdgeIndex + Math.floor(numVerts / 2)) % numVerts;
+      const nextNeighborEntry = currNeighbors.find(n => n.edgeIndexInFace === oppositeEdgeIdx);
+      if (!nextNeighborEntry) continue;
 
-      /*
-       * [FUTURE ORTHOGONAL EXPANSION POINT]:
-       * To expand in all orthogonal/lateral directions rather than just straight ahead,
-       * iterate through `for (let eIdx = 0; eIdx < numVerts; eIdx++)` skipping only `current.entryEdgeIndex`.
-       * Any lateral branch face would need bounding-box / polygon overlap checks against all existing `clusterFaces`.
-       */
-      const candidateEdges = [oppositeEdgeIdx];
+      const nextFaceIdx = nextNeighborEntry.neighborFace;
+      if (visitedFaces.has(nextFaceIdx)) continue; // Stop at collision or already visited
 
-      for (const eIdx of candidateEdges) {
-        const nextNeighborEntry = currNeighbors.find(n => n.edgeIndexInFace === eIdx);
-        if (!nextNeighborEntry) continue;
+      visitedFaces.set(nextFaceIdx, { branchId: current.branchId, depth: current.depth + 1, isCoPlanarWithFocus: false });
 
-        const nextFaceIdx = nextNeighborEntry.neighborFace;
+      const p1Local = current.localPolygon[oppositeEdgeIdx];
+      const p2Local = current.localPolygon[(oppositeEdgeIdx + 1) % numVerts];
 
-        // STOP if already claimed by any branch (including F0 or other cardinal directions)
-        if (visitedFaces.has(nextFaceIdx)) continue;
+      const nextFaceVerts2D = foldData.facesVertices[nextFaceIdx];
+      const nextOrigCoords = nextFaceVerts2D.map(vIdx => origCoords[vIdx]);
+      const isOpposite = nextNeighborEntry.isOpposite !== undefined ? nextNeighborEntry.isOpposite : true;
 
-        visitedFaces.set(nextFaceIdx, current.branchId);
+      const nextLocalPolygon = this.alignNeighborFaceToEdge(
+        nextOrigCoords,
+        nextNeighborEntry.neighborEdgeIndex,
+        p1Local,
+        p2Local,
+        isOpposite
+      );
 
-        const p1Local = current.localPolygon[eIdx];
-        const p2Local = current.localPolygon[(eIdx + 1) % numVerts];
+      const v1 = currFaceVerts2D[oppositeEdgeIdx];
+      const v2 = currFaceVerts2D[(oppositeEdgeIdx + 1) % numVerts];
+      const key2D = `${Math.min(v1, v2)}-${Math.max(v1, v2)}`;
+      const edgeIdx2D = foldData.edgeLookup ? foldData.edgeLookup.get(key2D) : -1;
+      const assign = edgeIdx2D >= 0 ? (foldData.edgesAssignment[edgeIdx2D] || 'C') : 'C';
+      const isFoldHinge = (assign === 'V' || assign === 'M' || assign === 'F');
 
-        const nextFaceVerts2D = foldData.facesVertices[nextFaceIdx];
-        const nextOrigCoords = nextFaceVerts2D.map(vIdx => origCoords[vIdx]);
-        const isOpposite = nextNeighborEntry.isOpposite !== undefined ? nextNeighborEntry.isOpposite : true;
+      clusterEdges.push({
+        edgeIndex: oppositeEdgeIdx,
+        v1,
+        v2,
+        p1: p1Local,
+        p2: p2Local,
+        isFoldHinge,
+        assignment: assign,
+        hasNeighbor: true,
+        neighborFace: nextFaceIdx
+      });
 
-        const nextLocalPolygon = this.alignNeighborFaceToEdge(
-          nextOrigCoords,
-          nextNeighborEntry.neighborEdgeIndex,
-          p1Local,
-          p2Local,
-          isOpposite
-        );
+      const nextDepth = current.depth + 1;
 
-        // Check if edge is fold hinge or cut
-        const v1 = currFaceVerts2D[eIdx];
-        const v2 = currFaceVerts2D[(eIdx + 1) % numVerts];
-        const key2D = `${Math.min(v1, v2)}-${Math.max(v1, v2)}`;
-        const edgeIdx2D = foldData.edgeLookup ? foldData.edgeLookup.get(key2D) : -1;
-        const assign = edgeIdx2D >= 0 ? (foldData.edgesAssignment[edgeIdx2D] || 'C') : 'C';
-        const isFoldHinge = (assign === 'V' || assign === 'M' || assign === 'F');
+      clusterFaces.push({
+        faceIndex: nextFaceIdx,
+        isFocus: false,
+        polygon: nextLocalPolygon,
+        origPolygon2D: nextOrigCoords,
+        sharedEdgeIndex: oppositeEdgeIdx,
+        branchId: current.branchId,
+        depth: nextDepth,
+        isCoPlanarWithFocus: false,
+        isFoldHinge,
+        clusterToNet: CrossSeamMapper.computeRigidAffine(nextLocalPolygon, nextOrigCoords),
+        netToCluster: CrossSeamMapper.computeRigidAffine(nextOrigCoords, nextLocalPolygon)
+      });
 
-        clusterEdges.push({
-          edgeIndex: eIdx,
-          v1,
-          v2,
-          p1: p1Local,
-          p2: p2Local,
-          isFoldHinge,
-          assignment: assign,
-          hasNeighbor: true,
-          neighborFace: nextFaceIdx
-        });
-
-        const nextDepth = current.depth + 1;
-
-        clusterFaces.push({
-          faceIndex: nextFaceIdx,
-          isFocus: false,
-          polygon: nextLocalPolygon,
-          origPolygon2D: nextOrigCoords,
-          sharedEdgeIndex: eIdx,
-          branchId: current.branchId,
-          depth: nextDepth,
-          isFoldHinge,
-          clusterToNet: CrossSeamMapper.computeRigidAffine(nextLocalPolygon, nextOrigCoords),
-          netToCluster: CrossSeamMapper.computeRigidAffine(nextOrigCoords, nextLocalPolygon)
-        });
-
-        // Enqueue next step along this cardinal branch
-        queue.push({
-          faceIndex: nextFaceIdx,
-          localPolygon: nextLocalPolygon,
-          entryEdgeIndex: nextNeighborEntry.neighborEdgeIndex,
-          branchId: current.branchId,
-          depth: nextDepth
-        });
-      }
+      cardinalQueue.push({
+        faceIndex: nextFaceIdx,
+        localPolygon: nextLocalPolygon,
+        entryEdgeIndex: nextNeighborEntry.neighborEdgeIndex,
+        branchId: current.branchId,
+        depth: nextDepth
+      });
     }
 
     return {

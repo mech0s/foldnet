@@ -412,7 +412,11 @@ export class GraphicStudio {
       const ptsStr = f.polygon.map(p => `${p[0]},${p[1]}`).join(' ');
       const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
       poly.setAttribute('points', ptsStr);
-      poly.setAttribute('class', f.isFocus ? 'cluster-face focus' : 'cluster-face neighbor');
+      let faceClass = 'cluster-face neighbor';
+      if (f.isFocus) faceClass = 'cluster-face focus';
+      else if (f.isCoPlanarWithFocus) faceClass = 'cluster-face coplanar';
+
+      poly.setAttribute('class', faceClass);
       poly.setAttribute('data-face', f.faceIndex);
       
       // Click neighbor face to focus it
