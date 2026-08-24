@@ -70,9 +70,10 @@ export const THEMES = {
 };
 
 export class FoldRenderer {
-  constructor(container) {
+  constructor(container, options = {}) {
     this.container = container;
     this.currentTheme = THEMES.highContrast;
+    this.onFaceClick = options.onFaceClick || null;
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(this.currentTheme.bg);
@@ -97,6 +98,36 @@ export class FoldRenderer {
 
     this.setupLights();
     this.setupGrid();
+
+    // Raycasting for interactive 3D face selection
+    this.raycaster = new THREE.Raycaster();
+    this.mouse = new THREE.Vector2();
+    this.pointerDownPos = { x: 0, y: 0 };
+
+    this.renderer.domElement.addEventListener('pointerdown', (e) => {
+      this.pointerDownPos = { x: e.clientX, y: e.clientY };
+    });
+
+    this.renderer.domElement.addEventListener('pointerup', (e) => {
+      // Only treat as click if pointer hasn't been dragged (orbit controls threshold)
+      const dist = Math.hypot(e.clientX - this.pointerDownPos.x, e.clientY - this.pointerDownPos.y);
+      if (dist < 6 && this.onFaceClick) {
+        const rect = this.renderer.domElement.getBoundingClientRect();
+        this.mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+        this.mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+        this.raycaster.setFromCamera(this.mouse, this.camera);
+
+        const meshes = this.faceMeshes.flatMap(item => [item.frontMesh, item.backMesh]);
+        const intersects = this.raycaster.intersectObjects(meshes, false);
+
+        if (intersects.length > 0) {
+          const hitMesh = intersects[0].object;
+          if (hitMesh.userData && hitMesh.userData.faceIndex !== undefined) {
+            this.onFaceClick(hitMesh.userData.faceIndex);
+          }
+        }
+      }
+    });
 
     // Geometry groups
     this.modelGroup = new THREE.Group();
@@ -251,6 +282,7 @@ export class FoldRenderer {
       const frontMesh = new THREE.Mesh(geometryFront, matFront);
       frontMesh.castShadow = true;
       frontMesh.receiveShadow = true;
+      frontMesh.userData = { faceIndex: fIdx };
 
       const geometryBack = new THREE.BufferGeometry();
       geometryBack.setAttribute('position', new THREE.BufferAttribute(positions.slice(), 3));
@@ -265,6 +297,7 @@ export class FoldRenderer {
       });
       const backMesh = new THREE.Mesh(geometryBack, matBack);
       backMesh.castShadow = true;
+      backMesh.userData = { faceIndex: fIdx };
 
       const faceGroup = new THREE.Group();
       faceGroup.add(frontMesh);

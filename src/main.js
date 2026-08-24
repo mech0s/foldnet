@@ -64,7 +64,13 @@ class App {
 
     const studioPreviewContainer = document.getElementById('studio-preview-canvas-container');
     if (studioPreviewContainer) {
-      this.studioPreviewRenderer = new FoldRenderer(studioPreviewContainer);
+      this.studioPreviewRenderer = new FoldRenderer(studioPreviewContainer, {
+        onFaceClick: (faceIdx) => {
+          if (this.graphicStudio) {
+            this.graphicStudio.setFocusFace(faceIdx);
+          }
+        }
+      });
       const themeSelect = document.getElementById('theme-select');
       if (themeSelect) this.studioPreviewRenderer.setTheme(themeSelect.value);
     }
