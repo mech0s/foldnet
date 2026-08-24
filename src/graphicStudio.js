@@ -393,7 +393,8 @@ export class GraphicStudio {
     const centerY = rect.height / 2 + this.panY;
 
     this.rootGroup.innerHTML = '';
-    this.rootGroup.setAttribute('transform', `translate(${centerX}, ${centerY}) scale(${this.zoom})`);
+    // Use scale(zoom, -zoom) so +Y is up, matching Cartesian / Net Editor coordinates
+    this.rootGroup.setAttribute('transform', `translate(${centerX}, ${centerY}) scale(${this.zoom}, ${-this.zoom})`);
 
     // 0. Define Per-Face ClipPaths
     const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
@@ -437,7 +438,8 @@ export class GraphicStudio {
 
       const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
       text.setAttribute('x', fcx);
-      text.setAttribute('y', fcy);
+      text.setAttribute('y', -fcy);
+      text.setAttribute('transform', `scale(1, -1)`);
       text.setAttribute('class', 'face-id-label');
       const fontSizeInCoordUnits = Math.max(0.001, 14 / (this.zoom || 1));
       text.setAttribute('font-size', `${fontSizeInCoordUnits}px`);
@@ -488,11 +490,8 @@ export class GraphicStudio {
   /**
    * [IN-PROGRESS / SCALING STRATEGY]:
    * Instantiates SVG elements from specs.
-   * Tool parameters (stroke width, font size, stamp sizes) are multiplied by `unitScale`
-   * so they scale appropriately with the model's coordinate system.
-   * `vector-effect="non-scaling-stroke"` ensures consistent on-screen line thickness.
    */
-  createSVGElementFromSpec(spec, faceClusterInfo) {
+  createSVGElementFromSpec(spec, targetFace = null) {
     let elem = null;
     const unitScale = this.modelUnitScale || 1;
 
@@ -510,7 +509,10 @@ export class GraphicStudio {
     } else if (spec.type === 'text') {
       elem = document.createElementNS('http://www.w3.org/2000/svg', 'text');
       elem.setAttribute('x', spec.x);
-      elem.setAttribute('y', spec.y);
+      elem.setAttribute('y', -spec.y);
+      // Flip Y locally so text renders upright in scale(zoom, -zoom) container
+      elem.setAttribute('transform', `scale(1, -1)`);
+      elem.setAttribute('dominant-baseline', 'hanging');
       elem.setAttribute('font-size', (spec.fontSize || 24) * unitScale);
       elem.setAttribute('font-weight', 'bold');
       elem.setAttribute('font-family', 'sans-serif');
@@ -534,7 +536,7 @@ export class GraphicStudio {
     const unitScale = this.modelUnitScale || 1;
     const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     const scaleFactor = (spec.scale || 1) * unitScale;
-    g.setAttribute('transform', `translate(${spec.x}, ${spec.y}) scale(${scaleFactor})`);
+    g.setAttribute('transform', `translate(${spec.x}, ${spec.y}) scale(${scaleFactor}, ${-scaleFactor})`);
     
     if (spec.stampType === 'fragile') {
       g.innerHTML = `
@@ -576,7 +578,8 @@ export class GraphicStudio {
     const centerX = rect.width / 2 + this.panX;
     const centerY = rect.height / 2 + this.panY;
     const x = (e.clientX - rect.left - centerX) / this.zoom;
-    const y = (e.clientY - rect.top - centerY) / this.zoom;
+    // Invert Y delta because rootGroup has scale(zoom, -zoom)
+    const y = -(e.clientY - rect.top - centerY) / this.zoom;
     return { x, y };
   }
 
@@ -749,7 +752,7 @@ export class GraphicStudio {
       const [w, h] = sizes[spec.stampType] || [60, 40];
       const sw = w * unitScale;
       const sh = h * unitScale;
-      return { minX: spec.x, minY: spec.y, maxX: spec.x + sw, maxY: spec.y + sh };
+      return { minX: spec.x, minY: spec.y - sh, maxX: spec.x + sw, maxY: spec.y };
     }
     return { minX: -1e9, minY: -1e9, maxX: 1e9, maxY: 1e9 };
   }

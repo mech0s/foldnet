@@ -338,7 +338,7 @@ export class FoldRenderer {
         meshItem.faceVerts.forEach((vIdx, i) => {
           const c = origCoords[vIdx];
           const px = (c[0] - bounds.minX) * sx;
-          const py = (c[1] - bounds.minY) * sy;
+          const py = (bounds.maxY - c[1]) * sy;
           if (i === 0) ctx.moveTo(px, py);
           else ctx.lineTo(px, py);
         });
@@ -352,18 +352,18 @@ export class FoldRenderer {
 
         // Apply composite cluster→net→canvas transform via ctx.setTransform
         // Canvas_x = (net_x - bounds.minX) * sx
-        // Canvas_y = (net_y - bounds.minY) * sy
+        // Canvas_y = (bounds.maxY - net_y) * sy
         // net_x = m.a * cx + m.c * cy + m.e
         // net_y = m.b * cx + m.d * cy + m.f
         if (item.clusterToNet) {
           const m = item.clusterToNet;
           ctx.setTransform(
             m.a * sx,
-            m.b * sy,
+            -m.b * sy,
             m.c * sx,
-            m.d * sy,
+            -m.d * sy,
             (m.e - bounds.minX) * sx,
-            (m.f - bounds.minY) * sy
+            (bounds.maxY - m.f) * sy
           );
         }
 
@@ -412,17 +412,23 @@ export class FoldRenderer {
         ctx.stroke();
       }
     } else if (item.type === 'text') {
+      ctx.save();
+      ctx.translate(item.x, item.y);
+      // Invert Y scale so text renders upright under the negative Y canvas transform
+      ctx.scale(1, -1);
       ctx.fillStyle = item.fill || '#ffffff';
       const fSize = (item.fontSize || 24) * unitScale;
       ctx.font = `bold ${fSize}px sans-serif`;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'top';
-      ctx.fillText(item.text || '', item.x, item.y);
+      ctx.fillText(item.text || '', 0, 0);
+      ctx.restore();
     } else if (item.type === 'stamp') {
       ctx.save();
       ctx.translate(item.x, item.y);
       const scaleFactor = (item.scale || 1) * unitScale;
-      ctx.scale(scaleFactor, scaleFactor);
+      // Invert Y scale so stamps render upright under the negative Y canvas transform
+      ctx.scale(scaleFactor, -scaleFactor);
       this.drawStampOnCanvas(ctx, item);
       ctx.restore();
     }
