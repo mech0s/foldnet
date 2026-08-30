@@ -89,20 +89,29 @@ export class CADParser {
     return this.extractFromThreeGroup(group);
   }
 
-  static extractFromThreeGroup(group) {
+  static extractFromThreeGroup(group, convertZUpToYUp = true) {
     const rawVertices = [];
     const triangles = [];
     const vertMap = new Map();
 
     const getVertIndex = (x, y, z, tol = 1e-4) => {
-      const rx = Math.round(x / tol) * tol;
-      const ry = Math.round(y / tol) * tol;
-      const rz = Math.round(z / tol) * tol;
+      let vx = x, vy = y, vz = z;
+      if (convertZUpToYUp) {
+        // Standard CAD Z-Up (SolidWorks / Fusion 360 / Onshape) to WebGL Y-Up mapping:
+        // X' = X (Right), Y' = Z (Up), Z' = -Y (Depth / Backwards)
+        vx = x;
+        vy = z;
+        vz = -y;
+      }
+
+      const rx = Math.round(vx / tol) * tol;
+      const ry = Math.round(vy / tol) * tol;
+      const rz = Math.round(vz / tol) * tol;
       const key = `${rx},${ry},${rz}`;
 
       if (vertMap.has(key)) return vertMap.get(key);
       const idx = rawVertices.length;
-      rawVertices.push([x, y, z]);
+      rawVertices.push([vx, vy, vz]);
       vertMap.set(key, idx);
       return idx;
     };
