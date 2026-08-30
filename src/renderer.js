@@ -217,9 +217,15 @@ export class FoldRenderer {
     return indices.length > 0 ? indices : [0, 1, 2];
   }
 
-  buildModel(foldData, kinematics) {
+  buildModel(foldData, kinematics, assemblyManager = null) {
+    if (assemblyManager && assemblyManager.isAssembly) {
+      return this.buildAssembly(assemblyManager);
+    }
+
+    this.assemblyManager = null;
     this.fold = foldData;
     this.kinematics = kinematics;
+    this.partMeshGroups = [];
 
     // Clear previous model
     while (this.modelGroup.children.length > 0) {
@@ -233,10 +239,8 @@ export class FoldRenderer {
     const origCoords = this.fold.vertices;
 
     this.fold.facesVertices.forEach((faceVerts, fIdx) => {
-      // Triangulate face using robust ShapeUtils triangulation (handles non-convex/L-shaped faces)
       const indices = this.triangulateFace(faceVerts, origCoords);
 
-      // Initial positions for face geometry (local to face)
       const positions = new Float32Array(faceVerts.length * 3);
       faceVerts.forEach((vIdx, i) => {
         const c = origCoords[vIdx];
@@ -245,7 +249,6 @@ export class FoldRenderer {
         positions[i * 3 + 2] = c[2];
       });
 
-      // Compute bounding box of face in 2D net coordinates for UV mapping
       let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
       faceVerts.forEach(vIdx => {
         const c = origCoords[vIdx];
@@ -257,7 +260,6 @@ export class FoldRenderer {
       const width = Math.max(maxX - minX, 1e-4);
       const height = Math.max(maxY - minY, 1e-4);
 
-      // UV coordinates (0..1)
       const uvs = new Float32Array(faceVerts.length * 2);
       faceVerts.forEach((vIdx, i) => {
         const c = origCoords[vIdx];
@@ -280,7 +282,7 @@ export class FoldRenderer {
       const frontMesh = new THREE.Mesh(geometryFront, matFront);
       frontMesh.castShadow = true;
       frontMesh.receiveShadow = true;
-      frontMesh.userData = { faceIndex: fIdx };
+      frontMesh.userData = { faceIndex: fIdx, partIndex: 0 };
 
       const geometryBack = new THREE.BufferGeometry();
       geometryBack.setAttribute('position', new THREE.BufferAttribute(positions.slice(), 3));
@@ -295,7 +297,7 @@ export class FoldRenderer {
       });
       const backMesh = new THREE.Mesh(geometryBack, matBack);
       backMesh.castShadow = true;
-      backMesh.userData = { faceIndex: fIdx };
+      backMesh.userData = { faceIndex: fIdx, partIndex: 0 };
 
       const faceGroup = new THREE.Group();
       faceGroup.add(frontMesh);
@@ -318,6 +320,170 @@ export class FoldRenderer {
 
     // Center and set camera
     this.centerModel();
+  }
+
+  /**
+   * Builds 3D multi-part assembly mesh groups from AssemblyManager.
+   * @param {import('./assemblyManager.js').AssemblyManager} assemblyManager
+   */
+  buildAssembly(assemblyManager) {
+    this.assemblyManager = assemblyManager;
+    this.partMeshGroups = [];
+    this.faceMeshes = [];
+
+    while (this.modelGroup.children.length > 0) {
+      const child = this.modelGroup.children[0];
+      if (child.geometry) child.geometry.dispose();
+      this.modelGroup.remove(child);
+    }
+
+    const themeColors = [
+      this.currentTheme.frontColor,
+      0x38bdf8, // sky blue
+      0x4ade80, // emerald green
+      0xfb923c, // orange
+      0xa855f7, // purple
+      0xf43f5e  // rose
+    ];
+
+    assemblyManager.parts.forEach((part, partIdx) => {
+      const partGroup = new THREE.Group();
+      partGroup.name = `part_${part.id}`;
+      this.modelGroup.add(partGroup);
+
+      const foldData = part.foldData;
+      const origCoords = foldData.vertices;
+      const partFaceMeshes = [];
+      const partColor = themeColors[partIdx % themeColors.length];
+
+      foldData.facesVertices.forEach((faceVerts, fIdx) => {
+        const indices = this.triangulateFace(faceVerts, origCoords);
+
+        const positions = new Float32Array(faceVerts.length * 3);
+        faceVerts.forEach((vIdx, i) => {
+          const c = origCoords[vIdx];
+          positions[i * 3 + 0] = c[0];
+          positions[i * 3 + 1] = c[1];
+          positions[i * 3 + 2] = c[2];
+        });
+
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        faceVerts.forEach(vIdx => {
+          const c = origCoords[vIdx];
+          if (c[0] < minX) minX = c[0];
+          if (c[0] > maxX) maxX = c[0];
+          if (c[1] < minY) minY = c[1];
+          if (c[1] > maxY) maxY = c[1];
+        });
+        const width = Math.max(maxX - minX, 1e-4);
+        const height = Math.max(maxY - minY, 1e-4);
+
+        const uvs = new Float32Array(faceVerts.length * 2);
+        faceVerts.forEach((vIdx, i) => {
+          const c = origCoords[vIdx];
+          uvs[i * 2 + 0] = (c[0] - minX) / width;
+          uvs[i * 2 + 1] = (c[1] - minY) / height;
+        });
+
+        const geometryFront = new THREE.BufferGeometry();
+        geometryFront.setAttribute('position', new THREE.BufferAttribute(positions.slice(), 3));
+        geometryFront.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+        geometryFront.setIndex(indices);
+        geometryFront.computeVertexNormals();
+
+        const matFront = new THREE.MeshStandardMaterial({
+          color: partColor,
+          roughness: 0.4,
+          metalness: 0.1,
+          side: THREE.FrontSide,
+          transparent: true,
+          opacity: 1.0
+        });
+        const frontMesh = new THREE.Mesh(geometryFront, matFront);
+        frontMesh.castShadow = true;
+        frontMesh.receiveShadow = true;
+        frontMesh.userData = { faceIndex: fIdx, partIndex: partIdx };
+
+        const geometryBack = new THREE.BufferGeometry();
+        geometryBack.setAttribute('position', new THREE.BufferAttribute(positions.slice(), 3));
+        geometryBack.setIndex(indices);
+        geometryBack.computeVertexNormals();
+
+        const matBack = new THREE.MeshStandardMaterial({
+          color: this.currentTheme.backColor,
+          roughness: 0.5,
+          metalness: 0.05,
+          side: THREE.BackSide,
+          transparent: true,
+          opacity: 1.0
+        });
+        const backMesh = new THREE.Mesh(geometryBack, matBack);
+        backMesh.castShadow = true;
+        backMesh.userData = { faceIndex: fIdx, partIndex: partIdx };
+
+        const faceGroup = new THREE.Group();
+        faceGroup.add(frontMesh);
+        faceGroup.add(backMesh);
+
+        partGroup.add(faceGroup);
+
+        const meshItem = {
+          faceGroup,
+          frontMesh,
+          backMesh,
+          faceVerts,
+          partIndex: partIdx,
+          faceIndex: fIdx,
+          faceBounds: { minX, maxX, minY, maxY, width, height }
+        };
+
+        partFaceMeshes.push(meshItem);
+        this.faceMeshes.push(meshItem);
+      });
+
+      // Build crease lines for this part
+      const numEdges = foldData.edgesVertices.length;
+      const posArray = new Float32Array(numEdges * 2 * 3);
+      const colArray = new Float32Array(numEdges * 2 * 3);
+
+      const lineGeo = new THREE.BufferGeometry();
+      lineGeo.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
+      lineGeo.setAttribute('color', new THREE.BufferAttribute(colArray, 3));
+
+      const lineMat = new THREE.LineBasicMaterial({
+        vertexColors: true,
+        linewidth: 2
+      });
+
+      const creaseLines = new THREE.LineSegments(lineGeo, lineMat);
+      creaseLines.visible = this.showCreases;
+      partGroup.add(creaseLines);
+
+      this.partMeshGroups.push({
+        partIndex: partIdx,
+        part,
+        group: partGroup,
+        faceMeshes: partFaceMeshes,
+        creaseLines,
+        foldData,
+        kinematics: part.kinematics
+      });
+    });
+
+    this.centerModel();
+    this.highlightActivePart(assemblyManager.activePartIndex);
+  }
+
+  highlightActivePart(activePartIndex) {
+    if (!this.partMeshGroups || this.partMeshGroups.length <= 1) return;
+
+    this.partMeshGroups.forEach((pmg, idx) => {
+      const isActive = idx === activePartIndex;
+      pmg.faceMeshes.forEach(meshItem => {
+        meshItem.frontMesh.material.opacity = isActive ? 1.0 : 0.6;
+        meshItem.backMesh.material.opacity = isActive ? 1.0 : 0.6;
+      });
+    });
   }
 
   /**
@@ -590,7 +756,70 @@ export class FoldRenderer {
     colorsAttr.needsUpdate = true;
   }
 
-  updateFold(t) {
+  updateFold(t, explodedT = 0) {
+    if (this.assemblyManager && this.assemblyManager.isAssembly) {
+      this.partMeshGroups.forEach((pmg) => {
+        const faceMatrices = pmg.kinematics.evaluateTransforms(t);
+
+        // Apply explosion offset: as fold progresses towards 1.0 (3D), parts expand radially
+        const exp = pmg.part.explosionVector || [0, 0, 0];
+        const factor = explodedT * t;
+        pmg.group.position.set(exp[0] * factor, exp[1] * factor, exp[2] * factor);
+
+        // Apply transforms to face groups
+        pmg.faceMeshes.forEach((item, fIdx) => {
+          const matrix = faceMatrices[fIdx];
+          if (matrix) {
+            item.faceGroup.matrix.copy(matrix);
+            item.faceGroup.matrixAutoUpdate = false;
+          }
+        });
+
+        // Update crease lines
+        if (pmg.creaseLines && this.showCreases) {
+          const posAttr = pmg.creaseLines.geometry.attributes.position;
+          const positions = posAttr.array;
+          const origCoords = pmg.foldData.vertices;
+
+          pmg.foldData.edgesVertices.forEach((edge, eIdx) => {
+            const v1Idx = edge[0];
+            const v2Idx = edge[1];
+
+            const p1 = new THREE.Vector3(...origCoords[v1Idx]);
+            const p2 = new THREE.Vector3(...origCoords[v2Idx]);
+
+            const isEdgeInFace = (fv, v1, v2) => {
+              const len = fv.length;
+              for (let i = 0; i < len; i++) {
+                const a = fv[i];
+                const b = fv[(i + 1) % len];
+                if ((a === v1 && b === v2) || (a === v2 && b === v1)) return true;
+              }
+              return false;
+            };
+
+            const faceVertsIdx = pmg.foldData.facesVertices.findIndex(fv => isEdgeInFace(fv, v1Idx, v2Idx));
+            const mat = faceVertsIdx >= 0 ? faceMatrices[faceVertsIdx] : new THREE.Matrix4();
+
+            p1.applyMatrix4(mat);
+            p2.applyMatrix4(mat);
+
+            const offset = eIdx * 6;
+            positions[offset + 0] = p1.x;
+            positions[offset + 1] = p1.y;
+            positions[offset + 2] = p1.z + 0.002;
+
+            positions[offset + 3] = p2.x;
+            positions[offset + 4] = p2.y;
+            positions[offset + 5] = p2.z + 0.002;
+          });
+
+          posAttr.needsUpdate = true;
+        }
+      });
+      return;
+    }
+
     if (!this.kinematics || !this.fold) return;
 
     const faceMatrices = this.kinematics.evaluateTransforms(t);
@@ -649,20 +878,28 @@ export class FoldRenderer {
   }
 
   centerModel() {
-    if (!this.fold) return;
     const box = new THREE.Box3();
 
-    // Compute bounding box of initial flat 2D net
-    this.fold.vertices.forEach(v => {
-      box.expandByPoint(new THREE.Vector3(v[0], v[1], v[2]));
-    });
+    if (this.assemblyManager && this.assemblyManager.isAssembly) {
+      this.assemblyManager.parts.forEach(p => {
+        p.foldData.vertices.forEach(v => {
+          box.expandByPoint(new THREE.Vector3(v[0], v[1], v[2]));
+        });
+      });
+    } else if (this.fold) {
+      this.fold.vertices.forEach(v => {
+        box.expandByPoint(new THREE.Vector3(v[0], v[1], v[2]));
+      });
+    } else {
+      return;
+    }
 
     const center = new THREE.Vector3();
     box.getCenter(center);
     const size = new THREE.Vector3();
     box.getSize(size);
 
-    // Offset model so center of 2D net is at origin (0, 0, 0)
+    // Offset model so center is at origin (0, 0, 0)
     this.modelGroup.position.set(-center.x, -center.y, 0);
 
     const maxDim = Math.max(size.x, size.y, size.z, 2);

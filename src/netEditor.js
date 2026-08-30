@@ -1,3 +1,5 @@
+import { PartThumbnailStrip } from './partThumbnailStrip.js';
+
 /**
  * Net Preparation & FOLD 1.1 Net Editor
  * 2D Interactive Canvas for editing vertices, faces, attachment edges, fold directives (M, V, B, C, F, U), and fold angles.
@@ -7,6 +9,15 @@ export class NetEditor {
   constructor(canvasContainer, onChangeCallback) {
     this.container = canvasContainer;
     this.onChange = onChangeCallback;
+
+    // Assembly State
+    this.assemblyManager = null;
+    this.onSelectAssemblyPart = null;
+
+    // Part Thumbnail Strip (for multi-component assemblies)
+    this.thumbnailStrip = new PartThumbnailStrip(this.container, {
+      onSelectPart: (partIdx) => this.selectPart(partIdx)
+    });
 
     // Create canvas
     this.canvas = document.createElement('canvas');
@@ -35,6 +46,48 @@ export class NetEditor {
     this.resizeCanvas();
     this.centerView();
     this.render();
+  }
+
+  /**
+   * Loads an AssemblyManager into the NetEditor.
+   * Focuses on the active part while rendering thumbnail strip of all parts.
+   * @param {import('./assemblyManager.js').AssemblyManager} assemblyManager
+   */
+  loadAssembly(assemblyManager, onSelectPart = null) {
+    this.assemblyManager = assemblyManager;
+    this.onSelectAssemblyPart = onSelectPart;
+
+    if (assemblyManager && assemblyManager.isAssembly) {
+      if (this.thumbnailStrip) {
+        this.thumbnailStrip.update(assemblyManager.parts, assemblyManager.activePartIndex);
+      }
+      const activePart = assemblyManager.getActivePart();
+      if (activePart) {
+        this.loadFoldJSON(activePart.foldJson || activePart.foldData, true);
+      }
+    } else {
+      if (this.thumbnailStrip) {
+        this.thumbnailStrip.update([], 0);
+      }
+      if (assemblyManager) {
+        const activePart = assemblyManager.getActivePart();
+        if (activePart) this.loadFoldJSON(activePart.foldJson || activePart.foldData, true);
+      }
+    }
+  }
+
+  selectPart(partIndex) {
+    if (this.assemblyManager && this.assemblyManager.parts[partIndex]) {
+      this.assemblyManager.setActivePartIndex(partIndex);
+      if (this.thumbnailStrip) {
+        this.thumbnailStrip.update(this.assemblyManager.parts, partIndex);
+      }
+      const part = this.assemblyManager.parts[partIndex];
+      this.loadFoldJSON(part.foldJson || part.foldData, true);
+      if (this.onSelectAssemblyPart) {
+        this.onSelectAssemblyPart(partIndex);
+      }
+    }
   }
 
   createDefaultCubeNet() {
@@ -91,14 +144,14 @@ export class NetEditor {
     const edges_assignment = [];
     const edges_foldAngle = [];
 
-    edges_vertices.forEach((edge, idx) => {
-      const key = `${edge[0]}-${edge[1]}`;
-      const count = edgeMap.get(key).count;
+    edges_vertices.forEach(([v1, v2]) => {
+      const key = `${v1}-${v2}`;
+      const isBoundary = edgeMap.get(key).count === 1;
 
       if (explicitAssignments[key]) {
         edges_assignment.push(explicitAssignments[key].assignment);
-        edges_foldAngle.push(explicitAssignments[key].angle);
-      } else if (count === 1) {
+        edges_foldAngle.push(explicitAssignments[key].foldAngle);
+      } else if (isBoundary) {
         // Outer boundary edge
         edges_assignment.push('B');
         edges_foldAngle.push(0);
@@ -125,7 +178,7 @@ export class NetEditor {
     return JSON.parse(JSON.stringify(this.foldData));
   }
 
-  loadFoldJSON(json) {
+  loadFoldJSON(json, silent = false) {
     if (!json || !json.vertices_coords || !json.faces_vertices) return;
 
     // Normalize vertices 3D -> 2D
@@ -159,7 +212,9 @@ export class NetEditor {
     this.hoveredEdgeIndex = -1;
     this.centerView();
     this.render();
-    this.notifyChange();
+    if (!silent) {
+      this.notifyChange();
+    }
   }
 
   notifyChange() {

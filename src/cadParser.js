@@ -147,10 +147,145 @@ export class CADParser {
   }
 
   /**
-   * Phase A Validation & Coplanar Triangle Merger
-   * Validates orthogonality of faces and merges coplanar triangles into planar 3D polygons.
+   * Segment raw mesh triangles into disconnected topological bodies/shells.
+   * @param {{vertices: number[][], triangles: number[][]}} meshData
+   * @returns {Array<{vertices: number[][], triangles: number[][]}>}
    */
-  static extractOrthogonalPlanarFaces(meshData, tolerance = 1e-4) {
+  static segmentConnectedTriangleBodies(meshData) {
+    const { vertices, triangles } = meshData;
+    if (!triangles || triangles.length === 0) return [];
+
+    const edgeToTris = new Map();
+    triangles.forEach((tri, tIdx) => {
+      for (let i = 0; i < 3; i++) {
+        const a = Math.min(tri[i], tri[(i + 1) % 3]);
+        const b = Math.max(tri[i], tri[(i + 1) % 3]);
+        const key = `${a}-${b}`;
+        if (!edgeToTris.has(key)) edgeToTris.set(key, []);
+        edgeToTris.get(key).push(tIdx);
+      }
+    });
+
+    const triAdj = Array.from({ length: triangles.length }, () => []);
+    edgeToTris.forEach(triList => {
+      for (let i = 0; i < triList.length; i++) {
+        for (let j = i + 1; j < triList.length; j++) {
+          triAdj[triList[i]].push(triList[j]);
+          triAdj[triList[j]].push(triList[i]);
+        }
+      }
+    });
+
+    const visited = new Uint8Array(triangles.length);
+    const bodies = [];
+
+    for (let i = 0; i < triangles.length; i++) {
+      if (visited[i]) continue;
+      const bodyTris = [];
+      const queue = [i];
+      visited[i] = 1;
+      while (queue.length > 0) {
+        const curr = queue.shift();
+        bodyTris.push(curr);
+        for (const nb of triAdj[curr]) {
+          if (!visited[nb]) {
+            visited[nb] = 1;
+            queue.push(nb);
+          }
+        }
+      }
+
+      // Remap vertices for this body
+      const bodyVertMap = new Map();
+      const bodyVertices = [];
+      const remappedTriangles = [];
+
+      bodyTris.forEach(tIdx => {
+        const tri = triangles[tIdx];
+        const newTri = tri.map(vIdx => {
+          if (bodyVertMap.has(vIdx)) return bodyVertMap.get(vIdx);
+          const newIdx = bodyVertices.length;
+          bodyVertices.push(vertices[vIdx]);
+          bodyVertMap.set(vIdx, newIdx);
+          return newIdx;
+        });
+        remappedTriangles.push(newTri);
+      });
+
+      bodies.push({
+        vertices: bodyVertices,
+        triangles: remappedTriangles
+      });
+    }
+
+    return bodies;
+  }
+
+  /**
+   * Phase A Validation & Multi-Body Extraction
+   * Extracts planar faces and grid refinement across all detected bodies in the CAD mesh.
+   * @param {{vertices: number[][], triangles: number[][]}} meshData
+   * @param {number} tolerance
+   * @returns {{isAssembly: boolean, components: Array<{id: string, name: string, vertices: number[][], facesVertices: number[][], bbox: {min: number[], max: number[]}, center: number[], area: number}>}}
+   */
+  static extractMultiBodyPlanarFaces(meshData, tolerance = 1e-4) {
+    const bodies = this.segmentConnectedTriangleBodies(meshData);
+    if (bodies.length === 0) {
+      throw new Error('Invalid CAD data: no valid 3D geometry found.');
+    }
+
+    const components = [];
+
+    bodies.forEach((bodyMesh, bIdx) => {
+      try {
+        const bodyPlanar = this.extractSingleBodyPlanarFaces(bodyMesh, tolerance);
+        if (bodyPlanar.facesVertices.length > 0) {
+          // Compute 3D bounding box & centroid
+          let minX = Infinity, minY = Infinity, minZ = Infinity;
+          let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+
+          bodyPlanar.vertices.forEach(v => {
+            minX = Math.min(minX, v[0]); maxX = Math.max(maxX, v[0]);
+            minY = Math.min(minY, v[1]); maxY = Math.max(maxY, v[1]);
+            minZ = Math.min(minZ, v[2]); maxZ = Math.max(maxZ, v[2]);
+          });
+
+          const center = [(minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2];
+          const totalArea = bodyPlanar.facesVertices.reduce(
+            (sum, fv) => sum + this.computeFaceArea(bodyPlanar.vertices, fv),
+            0
+          );
+
+          components.push({
+            id: `part_${bIdx}`,
+            name: bodies.length > 1 ? `Component ${bIdx + 1}` : 'Main Body',
+            vertices: bodyPlanar.vertices,
+            facesVertices: bodyPlanar.facesVertices,
+            bbox: { min: [minX, minY, minZ], max: [maxX, maxY, maxZ] },
+            center,
+            area: totalArea
+          });
+        }
+      } catch (err) {
+        console.warn(`[CADParser] Warning extracting body ${bIdx}:`, err.message);
+      }
+    });
+
+    if (components.length === 0) {
+      throw new Error('Could not extract any valid orthogonal planar faces from the CAD model.');
+    }
+
+    console.log(`[CADParser] Extracted ${components.length} component(s) from CAD model.`);
+    return {
+      isAssembly: components.length > 1,
+      components
+    };
+  }
+
+  /**
+   * Extract planar faces from a single connected 3D triangle body.
+   */
+  static extractSingleBodyPlanarFaces(meshData, tolerance = 1e-4) {
     const { vertices, triangles } = meshData;
     if (vertices.length === 0 || triangles.length === 0) {
       throw new Error('Invalid CAD data: empty vertices or triangles.');
@@ -262,19 +397,8 @@ export class CADParser {
       faceLoops.forEach(loop => planarFaces.push(loop));
     });
 
-    // For solid-mesh STLs the coplanar merger produces BOTH the outer surface
-    // and the inner shell as separate, disconnected edge-adjacency components.
-    // Keeping both causes the net unfolder to fail (inner/outer face pairs
-    // superimpose in 2D). We keep only the largest connected component by
-    // total face area — the outer surface. For pure surface-shell STLs there
-    // is exactly one component so nothing is discarded (concave notch walls stay).
     const filteredFaces = this.filterLargestConnectedComponent(vertices, planarFaces);
 
-    // Grid refinement (Demaine & O'Rourke "grid unfolding"):
-    // The spanning-tree unfolding algorithm requires all faces to be convex.
-    // Non-convex faces (L, T, U shapes with >4 vertices) must be subdivided
-    // into axis-aligned rectangles. We compute grid lines from all vertex
-    // coordinates on each face's plane, then clip each face into grid cells.
     const { vertices: refinedVertices, facesVertices: refinedFaces } =
       this.subdivideNonConvexFaces(vertices, filteredFaces);
 
@@ -285,11 +409,41 @@ export class CADParser {
   }
 
   /**
+   * Phase A Validation & Coplanar Triangle Merger (Legacy single-body entry point)
+   */
+  static extractOrthogonalPlanarFaces(meshData, tolerance = 1e-4) {
+    const multiResult = this.extractMultiBodyPlanarFaces(meshData, tolerance);
+    // Return largest component for single-body backward compatibility
+    const mainComp = multiResult.components.reduce((max, c) => c.area > max.area ? c : max, multiResult.components[0]);
+    return {
+      vertices: mainComp.vertices,
+      facesVertices: mainComp.facesVertices
+    };
+  }
+
+  /**
    * Demaine-style global grid refinement: collect ALL vertex X/Y/Z coordinates
    * as grid lines, then subdivide EVERY face into axis-aligned rectangular cells.
    * This ensures adjacent faces on perpendicular planes share intermediate
    * vertices, maintaining dual-graph connectivity after subdivision.
    */
+  /**
+   * Newell's method to compute exact outward area-weighted normal for arbitrary 3D polygons.
+   */
+  static computePolygonNormal(vertices3D, faceVertIndices) {
+    let nx = 0, ny = 0, nz = 0;
+    const n = faceVertIndices.length;
+    for (let i = 0; i < n; i++) {
+      const curr = vertices3D[faceVertIndices[i]];
+      const next = vertices3D[faceVertIndices[(i + 1) % n]];
+      nx += (curr[1] - next[1]) * (curr[2] + next[2]);
+      ny += (curr[2] - next[2]) * (curr[0] + next[0]);
+      nz += (curr[0] - next[0]) * (curr[1] + next[1]);
+    }
+    const len = Math.hypot(nx, ny, nz);
+    return len > 1e-6 ? new THREE.Vector3(nx / len, ny / len, nz / len) : new THREE.Vector3(0, 0, 1);
+  }
+
   static subdivideNonConvexFaces(vertices, planarFaces) {
     // Step 1: Collect global grid coordinates from ALL vertices across ALL faces
     const globalX = new Set();
@@ -311,22 +465,16 @@ export class CADParser {
     const gz = [...globalZ].sort((a, b) => a - b);
 
     // Step 2: Build vertex dedup map
-    const newVertices = vertices.slice();
+    const newVertices = vertices.map(v => [snap(v[0]), snap(v[1]), snap(v[2])]);
     const vertMap = new Map();
+    newVertices.forEach((v, idx) => {
+      vertMap.set(`${v[0]},${v[1]},${v[2]}`, idx);
+    });
 
     const getVertIdx = (x, y, z) => {
       const rx = snap(x), ry = snap(y), rz = snap(z);
       const key = `${rx},${ry},${rz}`;
       if (vertMap.has(key)) return vertMap.get(key);
-
-      // Search existing original vertices
-      for (let i = 0; i < vertices.length; i++) {
-        const v = vertices[i];
-        if (Math.abs(v[0] - rx) < tol && Math.abs(v[1] - ry) < tol && Math.abs(v[2] - rz) < tol) {
-          vertMap.set(key, i);
-          return i;
-        }
-      }
       const idx = newVertices.length;
       newVertices.push([rx, ry, rz]);
       vertMap.set(key, idx);
@@ -338,13 +486,8 @@ export class CADParser {
     const gridAxes = [gx, gy, gz]; // indexed by axis 0=X, 1=Y, 2=Z
 
     for (const fv of planarFaces) {
-      // Determine face normal → fixed axis
-      const p0 = new THREE.Vector3(...vertices[fv[0]]);
-      const p1 = new THREE.Vector3(...vertices[fv[1]]);
-      const p2 = new THREE.Vector3(...vertices[fv[2]]);
-      const e1 = new THREE.Vector3().subVectors(p1, p0);
-      const e2 = new THREE.Vector3().subVectors(p2, p0);
-      const normal = new THREE.Vector3().crossVectors(e1, e2).normalize();
+      // Determine true face normal via Newell's method
+      const normal = this.computePolygonNormal(vertices, fv);
 
       const ax = Math.abs(normal.x), ay = Math.abs(normal.y), az = Math.abs(normal.z);
       let fixedAxis, uAxis, vAxis;

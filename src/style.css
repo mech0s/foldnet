@@ -1314,4 +1314,155 @@ body {
   vector-effect: non-scaling-stroke;
 }
 
+/* ==========================================================================
+   Multi-Component Assembly Part Thumbnail Strip & Cards
+   ========================================================================== */
+.part-thumbnail-strip {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 1rem;
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border-color);
+  z-index: 10;
+  overflow-x: auto;
+}
+
+.part-strip-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.part-cards-scroll {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex: 1;
+  overflow-x: auto;
+  padding: 0.2rem 0;
+}
+
+.part-card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.35rem 0.65rem;
+  background: rgba(30, 41, 59, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.part-card:hover {
+  background: rgba(51, 65, 85, 0.9);
+  border-color: rgba(99, 102, 241, 0.5);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+.part-card.active {
+  background: rgba(99, 102, 241, 0.2);
+  border-color: var(--primary-accent);
+  box-shadow: 0 0 12px var(--primary-glow);
+}
+
+.part-card-thumb {
+  width: 42px;
+  height: 42px;
+  border-radius: 5px;
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.part-mini-svg {
+  width: 100%;
+  height: 100%;
+}
+
+.part-thumb-poly {
+  fill: rgba(99, 102, 241, 0.25);
+  stroke: rgba(255, 255, 255, 0.4);
+  stroke-width: 0.8px;
+  vector-effect: non-scaling-stroke;
+}
+
+.part-card.active .part-thumb-poly {
+  fill: rgba(99, 102, 241, 0.5);
+  stroke: #a5b4fc;
+}
+
+.part-thumb-edge.edge-V { stroke: #3b82f6; stroke-width: 1.2px; }
+.part-thumb-edge.edge-M { stroke: #ef4444; stroke-width: 1.2px; }
+.part-thumb-edge.edge-B { stroke: #ffffff; stroke-width: 1.2px; }
+.part-thumb-edge.edge-C { stroke: #f97316; stroke-dasharray: 2,2; stroke-width: 1px; }
+
+.part-card-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.part-card-title {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-main);
+  white-space: nowrap;
+}
+
+.part-card-badge {
+  font-size: 0.65rem;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+}
+
+.part-card-active-tag {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  font-size: 0.55rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  background: var(--primary-accent);
+  color: #fff;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+}
+
+/* Assembly Controls in Main View */
+.assembly-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  padding: 0.2rem 0.5rem;
+  border-radius: 6px;
+}
+
+.exploded-slider-container {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: 0.75rem;
+}
+
+
 

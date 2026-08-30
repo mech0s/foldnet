@@ -1,4 +1,5 @@
 import { CrossSeamMapper } from './crossSeamMapper.js';
+import { PartThumbnailStrip } from './partThumbnailStrip.js';
 
 /**
  * Graphic Studio: Neighbor Cluster Painting Engine
@@ -9,6 +10,10 @@ import { CrossSeamMapper } from './crossSeamMapper.js';
 export class GraphicStudio {
   constructor(container, options = {}) {
     this.container = container;
+    this.assemblyManager = null;
+    this.onSelectAssemblyPart = null;
+    this.thumbnailStrip = null;
+
     this.foldData = null;
     this.kinematics = null;
     this.cadDualGraph = null;
@@ -87,6 +92,8 @@ export class GraphicStudio {
             </button>
           </div>
         </div>
+
+        <div id="studio-part-strip-container"></div>
 
         <div class="studio-layout">
           <!-- Studio Left Toolbar -->
@@ -232,6 +239,55 @@ export class GraphicStudio {
     this.svgElement = this.container.querySelector('#studio-svg-canvas');
     this.rootGroup = this.container.querySelector('#cluster-root-group');
     this.navSvg = this.container.querySelector('#navigator-svg');
+
+    const stripContainer = this.container.querySelector('#studio-part-strip-container');
+    if (stripContainer) {
+      this.thumbnailStrip = new PartThumbnailStrip(stripContainer, {
+        onSelectPart: (partIdx) => this.selectPart(partIdx)
+      });
+    }
+  }
+
+  /**
+   * Loads an AssemblyManager into GraphicStudio.
+   * Focuses on the active part while rendering thumbnail strip of all parts.
+   * @param {import('./assemblyManager.js').AssemblyManager} assemblyManager
+   */
+  loadAssembly(assemblyManager, onSelectPart = null) {
+    this.assemblyManager = assemblyManager;
+    this.onSelectAssemblyPart = onSelectPart;
+
+    if (assemblyManager && assemblyManager.isAssembly) {
+      if (this.thumbnailStrip) {
+        this.thumbnailStrip.update(assemblyManager.parts, assemblyManager.activePartIndex);
+      }
+      const activePart = assemblyManager.getActivePart();
+      if (activePart) {
+        this.loadModel(activePart.foldData, activePart.kinematics);
+      }
+    } else {
+      if (this.thumbnailStrip) {
+        this.thumbnailStrip.update([], 0);
+      }
+      if (assemblyManager) {
+        const activePart = assemblyManager.getActivePart();
+        if (activePart) this.loadModel(activePart.foldData, activePart.kinematics);
+      }
+    }
+  }
+
+  selectPart(partIndex) {
+    if (this.assemblyManager && this.assemblyManager.parts[partIndex]) {
+      this.assemblyManager.setActivePartIndex(partIndex);
+      if (this.thumbnailStrip) {
+        this.thumbnailStrip.update(this.assemblyManager.parts, partIndex);
+      }
+      const part = this.assemblyManager.parts[partIndex];
+      this.loadModel(part.foldData, part.kinematics);
+      if (this.onSelectAssemblyPart) {
+        this.onSelectAssemblyPart(partIndex);
+      }
+    }
   }
 
   bindEvents() {

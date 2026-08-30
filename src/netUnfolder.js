@@ -49,9 +49,10 @@ export class NetUnfolder {
    * @param {number[][]} facesVerts Array of face vertex index loops
    * @param {number|Function} seed PRNG seed integer (default 1) or custom RNG function
    * @param {number} maxAttempts Maximum randomized MST unfolding retries (default 500)
+   * @param {object} [options] Metadata options (e.g. componentId, bbox, center)
    * @returns {object} Valid FOLD 1.1 spec JSON object
    */
-  static unfoldToFoldJSON(vertices3D, facesVerts, seed = 1, maxAttempts = 500) {
+  static unfoldToFoldJSON(vertices3D, facesVerts, seed = 1, maxAttempts = 500, options = {}) {
     if (facesVerts.length === 0) {
       throw new Error('Unfolder: No 3D faces provided.');
     }
@@ -74,7 +75,7 @@ export class NetUnfolder {
       const unrollResult = this.unrollTree2D(vertices3D, facesVerts, dualGraph, treeEdges, rootFace);
 
       if (unrollResult.success) {
-        bestResult = unrollResult;
+        bestResult = { ...unrollResult, rootFace };
         console.log(`[NetUnfolder] Success on attempt ${attempt + 1}. Root face: ${rootFace}`);
         break;
       }
@@ -84,13 +85,50 @@ export class NetUnfolder {
       throw new Error(`Unfolder: Could not find a collision-free 2D unrolling after ${maxAttempts} randomized attempts.`);
     }
 
-    return this.buildFoldSpecJSON(vertices3D, facesVerts, dualGraph, bestResult);
+    return this.buildFoldSpecJSON(vertices3D, facesVerts, dualGraph, bestResult, options);
+  }
+
+  /**
+   * Unfolds an entire multi-component CAD assembly into self-contained part nets.
+   * @param {Array<{id: string, name: string, vertices: number[][], facesVertices: number[][], bbox: object, center: number[]}>} components
+   * @param {number|Function} seed Base seed
+   * @param {number} maxAttempts Retries per component
+   * @returns {{isAssembly: boolean, title: string, parts: Array<{id: string, name: string, foldData: object, bbox: object, center: number[]}>}}
+   */
+  static unfoldAssemblyToFold(components, seed = 1, maxAttempts = 500) {
+    const parts = [];
+
+    components.forEach((comp, idx) => {
+      const partSeed = typeof seed === 'number' ? seed + idx * 7919 : seed;
+      const partFold = this.unfoldToFoldJSON(comp.vertices, comp.facesVertices, partSeed, maxAttempts, {
+        componentId: comp.id,
+        name: comp.name,
+        bbox: comp.bbox,
+        center: comp.center,
+        area: comp.area
+      });
+      partFold.file_title = comp.name;
+
+      parts.push({
+        id: comp.id,
+        name: comp.name,
+        foldData: partFold,
+        bbox: comp.bbox,
+        center: comp.center
+      });
+    });
+
+    return {
+      isAssembly: parts.length > 1,
+      title: 'Multi-Part CAD Assembly',
+      parts
+    };
   }
 
   /**
    * Constructs the final FOLD 1.1 JSON object from the successful 2D unrolling.
    */
-  static buildFoldSpecJSON(vertices3D, facesVerts, dualGraph, bestResult) {
+  static buildFoldSpecJSON(vertices3D, facesVerts, dualGraph, bestResult, options = {}) {
     const { facePositions2D, treeEdges } = bestResult;
 
     // Collect unique 2D vertices with snap tolerance
@@ -178,15 +216,26 @@ export class NetUnfolder {
       }
     });
 
+    const rootFaceIdx = bestResult.rootFace !== undefined ? bestResult.rootFace : 0;
+    const rootFace3D = (facesVerts[rootFaceIdx] || []).map(vi => vertices3D[vi]);
+
     return {
       file_spec: 1.1,
-      file_title: 'Unfolded Box Net',
+      file_title: options.name || 'Unfolded Box Net',
       file_creator: 'FOLDNet CAD Unfolder',
       vertices_coords,
       faces_vertices: newFacesVerts,
       edges_vertices,
       edges_assignment,
-      edges_foldAngle
+      edges_foldAngle,
+      _assembly: {
+        componentId: options.componentId || 'part_0',
+        name: options.name || 'Component',
+        rootFaceIndex: rootFaceIdx,
+        target3DOrigin: options.center || [0, 0, 0],
+        target3DBBox: options.bbox || null,
+        rootFace3DVertices: rootFace3D
+      }
     };
   }
 
@@ -200,14 +249,19 @@ export class NetUnfolder {
     const numFaces = facesVerts.length;
     const edgeToFaces = new Map();
 
-    // Compute surface normal for each face (assuming faces are 2D convex & orthogonal)
+    // Compute surface normal for each face via Newell's method to guarantee outward normal orientation
     const faceNormals = facesVerts.map(fv => {
-      const p0 = new THREE.Vector3(...vertices3D[fv[0]]);
-      const p1 = new THREE.Vector3(...vertices3D[fv[1]]);
-      const p2 = new THREE.Vector3(...vertices3D[fv[2]]);
-      const e1 = new THREE.Vector3().subVectors(p1, p0);
-      const e2 = new THREE.Vector3().subVectors(p2, p0);
-      return new THREE.Vector3().crossVectors(e1, e2).normalize();
+      let nx = 0, ny = 0, nz = 0;
+      const n = fv.length;
+      for (let i = 0; i < n; i++) {
+        const curr = vertices3D[fv[i]];
+        const next = vertices3D[fv[(i + 1) % n]];
+        nx += (curr[1] - next[1]) * (curr[2] + next[2]);
+        ny += (curr[2] - next[2]) * (curr[0] + next[0]);
+        nz += (curr[0] - next[0]) * (curr[1] + next[1]);
+      }
+      const len = Math.hypot(nx, ny, nz);
+      return len > 1e-6 ? new THREE.Vector3(nx / len, ny / len, nz / len) : new THREE.Vector3(0, 0, 1);
     });
 
     // Find shared edges
@@ -278,7 +332,12 @@ export class NetUnfolder {
    */
   static computeSpanningTree(numFaces, edges, rng = Math.random) {
     const randomFunc = rng || Math.random;
-    const weightedEdges = edges.map(e => ({ ...e, weight: randomFunc() }));
+    // Prefer flat coplanar edges (foldAngleDeg === 0) so subdivided face cells remain connected
+    const weightedEdges = edges.map(e => {
+      const isFlat = Math.abs(e.foldAngleDeg) < 1e-4;
+      const weight = isFlat ? (randomFunc() * 0.01) : (0.1 + randomFunc() * 0.9);
+      return { ...e, weight };
+    });
     weightedEdges.sort((a, b) => a.weight - b.weight);
 
     const parent = Array.from({ length: numFaces }, (_, i) => i);
@@ -353,25 +412,7 @@ export class NetUnfolder {
 
           if (!cV1Local || !cV2Local) return { success: false };
 
-          // Determine reference point on parent side
-          const hDx = pV2Pos[0] - pV1Pos[0];
-          const hDy = pV2Pos[1] - pV1Pos[1];
-          let pRefPoint = null;
-          let maxHingeDist = -Infinity;
-          for (let i = 0; i < pCoords2D.length; i++) {
-            const vi = pFaceVerts[i];
-            if (vi === edge.v1 || vi === edge.v2) continue;
-            const pt = pCoords2D[i];
-            const d = Math.abs(hDx * (pt[1] - pV1Pos[1]) - hDy * (pt[0] - pV1Pos[0]));
-            if (d > maxHingeDist) { maxHingeDist = d; pRefPoint = pt; }
-          }
-          if (!pRefPoint) {
-            let cx = 0, cy = 0;
-            pCoords2D.forEach(p => { cx += p[0]; cy += p[1]; });
-            pRefPoint = [cx / pCoords2D.length, cy / pCoords2D.length];
-          }
-
-          // Align child hinge to parent hinge using pure rigid 2D transformation (no reflection)
+          // Align child hinge to parent hinge using rigid 2D transformation (preserving counter-clockwise outward normal)
           const cGlobal2D = this.transformPoints2D(cLocal2D, cV1Local, cV2Local, pV1Pos, pV2Pos);
           facePositions2D[cIdx] = cGlobal2D;
 

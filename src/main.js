@@ -5,14 +5,17 @@ import { NetEditor } from './netEditor.js';
 import { CADParser } from './cadParser.js';
 import { NetUnfolder } from './netUnfolder.js';
 import { GraphicStudio } from './graphicStudio.js';
+import { AssemblyManager } from './assemblyManager.js';
 
 class App {
   constructor() {
     this.container = document.getElementById('canvas-container');
     this.renderer = new FoldRenderer(this.container);
 
+    this.assemblyManager = new AssemblyManager();
     this.foldData = null;
     this.kinematics = null;
+    this.explodedProgress = 0.0;
 
     this.isPlaying = false;
     this.animSpeed = 1.0;
@@ -180,19 +183,32 @@ class App {
         
         const content = ext === 'stl' ? await response.arrayBuffer() : await response.text();
         const meshData = await CADParser.parseCADFile(content, ext);
-        const planarData = CADParser.extractOrthogonalPlanarFaces(meshData);
+        const multiPlanar = CADParser.extractMultiBodyPlanarFaces(meshData);
         
         // Reset seed to 1 on fresh file load for repeatable generation
         this.currentCadSeed = 1;
         const fileName = url.split('/').pop().split('?')[0];
         const fileTitle = fileName.replace(/\.[^/.]+$/, '');
-        this.currentCadPlanarData = { ...planarData, title: fileTitle };
+        this.currentCadPlanarData = { ...multiPlanar, title: fileTitle };
 
-        const foldJson = NetUnfolder.unfoldToFoldJSON(planarData.vertices, planarData.facesVertices, this.currentCadSeed);
-        foldJson.file_title = fileTitle;
-        
-        this.updateRegenButtonUI(true);
-        this.initFoldModel(foldJson);
+        if (multiPlanar.isAssembly) {
+          const assemblyPayload = NetUnfolder.unfoldAssemblyToFold(multiPlanar.components, this.currentCadSeed);
+          this.assemblyManager.loadAssembly(assemblyPayload);
+          this.updateRegenButtonUI(true);
+          this.initAssemblyModel(this.assemblyManager);
+        } else {
+          const comp = multiPlanar.components[0];
+          const foldJson = NetUnfolder.unfoldToFoldJSON(comp.vertices, comp.facesVertices, this.currentCadSeed, 500, {
+            componentId: comp.id,
+            bbox: comp.bbox,
+            center: comp.center,
+            name: fileTitle
+          });
+          foldJson.file_title = fileTitle;
+          this.assemblyManager.loadAssembly(foldJson);
+          this.updateRegenButtonUI(true);
+          this.initAssemblyModel(this.assemblyManager);
+        }
       } else {
         const response = await fetch(url);
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
@@ -210,32 +226,85 @@ class App {
   }
 
   initFoldModel(jsonData) {
+    this.assemblyManager.loadAssembly(jsonData);
+    this.initAssemblyModel(this.assemblyManager);
+  }
+
+  initAssemblyModel(assemblyManager) {
     try {
-      this.foldData = parseFoldData(jsonData);
-      this.kinematics = new FoldKinematics(this.foldData);
-      this.renderer.buildModel(this.foldData, this.kinematics);
+      this.assemblyManager = assemblyManager;
+      const activePart = assemblyManager.getActivePart();
+      if (!activePart) return;
+
+      this.foldData = activePart.foldData;
+      this.kinematics = activePart.kinematics;
+
+      this.renderer.buildModel(this.foldData, this.kinematics, this.assemblyManager);
+
+      if (this.previewRenderer) {
+        this.previewFoldData = this.foldData;
+        this.previewKinematics = this.kinematics;
+        this.previewRenderer.buildModel(this.foldData, this.kinematics);
+        this.updatePreviewFoldProgress();
+      }
 
       if (this.studioPreviewRenderer) {
-        this.studioPreviewRenderer.buildModel(this.foldData, this.kinematics);
+        this.studioPreviewRenderer.buildModel(this.foldData, this.kinematics, this.assemblyManager);
         this.updateStudioPreviewFoldProgress();
+      }
+
+      // Toggle Exploded View Slider UI
+      const expGroup = document.getElementById('exploded-slider-group');
+      if (expGroup) {
+        expGroup.style.display = assemblyManager.isAssembly ? 'flex' : 'none';
+        const expSlider = document.getElementById('exploded-slider');
+        if (expSlider) expSlider.value = 0;
+        this.explodedProgress = 0.0;
+        const expVal = document.getElementById('exploded-slider-value');
+        if (expVal) expVal.textContent = '0%';
       }
 
       this.updateInspectorUI();
       this.resetSlider();
       this.updateFoldProgress();
 
-      // Also update Net Editor if available
+      // Update Net Editor with Assembly
       if (this.netEditor) {
-        this.netEditor.loadFoldJSON(jsonData);
+        this.netEditor.loadAssembly(this.assemblyManager, (partIdx) => {
+          this.onSelectAssemblyPart(partIdx);
+        });
       }
 
-      // Also update Graphic Studio if available
+      // Update Graphic Studio with Assembly
       if (this.graphicStudio) {
-        this.graphicStudio.loadModel(this.foldData, this.kinematics, this.currentCadPlanarData ? this.currentCadPlanarData.dualGraph : null);
+        this.graphicStudio.loadAssembly(this.assemblyManager, (partIdx) => {
+          this.onSelectAssemblyPart(partIdx);
+        });
       }
     } catch (err) {
-      console.error('Error initializing FOLD model:', err);
-      alert(`Error parsing FOLD file: ${err.message}`);
+      console.error('Error initializing Assembly model:', err);
+      alert(`Error initializing Assembly: ${err.message}`);
+    }
+  }
+
+  onSelectAssemblyPart(partIndex) {
+    if (!this.assemblyManager) return;
+    this.assemblyManager.setActivePartIndex(partIndex);
+    this.renderer.highlightActivePart(partIndex);
+    if (this.studioPreviewRenderer) {
+      this.studioPreviewRenderer.highlightActivePart(partIndex);
+    }
+    const activePart = this.assemblyManager.getActivePart();
+    if (activePart) {
+      this.foldData = activePart.foldData;
+      this.kinematics = activePart.kinematics;
+      if (this.previewRenderer) {
+        this.previewFoldData = activePart.foldData;
+        this.previewKinematics = activePart.kinematics;
+        this.previewRenderer.buildModel(this.foldData, this.kinematics);
+        this.updatePreviewFoldProgress();
+      }
+      this.updateInspectorUI();
     }
   }
 
@@ -280,20 +349,26 @@ class App {
       }
     }
 
-    // 2. Synchronize main 3D fold viewer and Graphic Studio models in real time
+    // 2. Synchronize AssemblyManager, main 3D fold viewer, and Graphic Studio
     try {
+      if (this.assemblyManager) {
+        this.assemblyManager.updateActivePartFoldJSON(foldJson);
+      }
       this.foldData = parseFoldData(foldJson);
       this.kinematics = new FoldKinematics(this.foldData);
+
       if (this.renderer) {
-        this.renderer.buildModel(this.foldData, this.kinematics);
+        this.renderer.buildModel(this.foldData, this.kinematics, this.assemblyManager);
         this.updateFoldProgress();
       }
       if (this.studioPreviewRenderer) {
-        this.studioPreviewRenderer.buildModel(this.foldData, this.kinematics);
+        this.studioPreviewRenderer.buildModel(this.foldData, this.kinematics, this.assemblyManager);
         this.updateStudioPreviewFoldProgress();
       }
       if (this.graphicStudio) {
-        this.graphicStudio.loadModel(this.foldData, this.kinematics, this.currentCadPlanarData ? this.currentCadPlanarData.dualGraph : null);
+        this.graphicStudio.loadAssembly(this.assemblyManager, (partIdx) => {
+          this.onSelectAssemblyPart(partIdx);
+        });
       }
       this.updateInspectorUI();
     } catch (e) {
@@ -318,7 +393,7 @@ class App {
     const val = parseFloat(slider.value);
     const t = val / 100;
 
-    this.renderer.updateFold(t);
+    this.renderer.updateFold(t, this.explodedProgress || 0);
 
     // Update readout UI
     const valueDisplay = document.getElementById('slider-value');
@@ -330,12 +405,14 @@ class App {
     // Update status badge
     const badgeText = document.getElementById('state-text');
     if (badgeText) {
+      const isAssy = this.assemblyManager && this.assemblyManager.isAssembly;
+      const assyTag = isAssy ? ` [${this.assemblyManager.parts.length} PARTS]` : '';
       if (val === 0) {
-        badgeText.textContent = 'FLAT 2D NET';
+        badgeText.textContent = `FLAT 2D NET${assyTag}`;
       } else if (val === 100) {
-        badgeText.textContent = '3D BOX';
+        badgeText.textContent = `3D ASSEMBLED${assyTag}`;
       } else {
-        badgeText.textContent = `FOLDING (${Math.round(val)}%)`;
+        badgeText.textContent = `FOLDING (${Math.round(val)}%)${assyTag}`;
       }
     }
   }
@@ -397,6 +474,17 @@ class App {
       if (this.isPlaying) this.pauseAnimation();
       this.updateFoldProgress();
     });
+
+    // Exploded View Slider event
+    const expSlider = document.getElementById('exploded-slider');
+    if (expSlider) {
+      expSlider.addEventListener('input', (e) => {
+        this.explodedProgress = parseFloat(e.target.value) / 100;
+        const expVal = document.getElementById('exploded-slider-value');
+        if (expVal) expVal.textContent = `${Math.round(this.explodedProgress * 100)}%`;
+        this.updateFoldProgress();
+      });
+    }
 
     // Model selection dropdown
     const modelSelect = document.getElementById('model-select');
@@ -775,20 +863,33 @@ class App {
         try {
           const content = e.target.result;
           const meshData = await CADParser.parseCADFile(content, ext);
-          const planarData = CADParser.extractOrthogonalPlanarFaces(meshData);
+          const multiPlanar = CADParser.extractMultiBodyPlanarFaces(meshData);
           
           // Reset seed to 1 on fresh CAD load
           this.currentCadSeed = 1;
           const fileTitle = file.name.replace(/\.[^/.]+$/, '');
-          this.currentCadPlanarData = { ...planarData, title: fileTitle };
-
-          const foldJson = NetUnfolder.unfoldToFoldJSON(planarData.vertices, planarData.facesVertices, this.currentCadSeed);
-          foldJson.file_title = fileTitle;
-
-          this.updateRegenButtonUI(true);
+          this.currentCadPlanarData = { ...multiPlanar, title: fileTitle };
 
           if (modelSelect) modelSelect.value = 'custom';
-          this.initFoldModel(foldJson);
+
+          if (multiPlanar.isAssembly) {
+            const assemblyPayload = NetUnfolder.unfoldAssemblyToFold(multiPlanar.components, this.currentCadSeed);
+            this.assemblyManager.loadAssembly(assemblyPayload);
+            this.updateRegenButtonUI(true);
+            this.initAssemblyModel(this.assemblyManager);
+          } else {
+            const comp = multiPlanar.components[0];
+            const foldJson = NetUnfolder.unfoldToFoldJSON(comp.vertices, comp.facesVertices, this.currentCadSeed, 500, {
+              componentId: comp.id,
+              bbox: comp.bbox,
+              center: comp.center,
+              name: fileTitle
+            });
+            foldJson.file_title = fileTitle;
+            this.assemblyManager.loadAssembly(foldJson);
+            this.updateRegenButtonUI(true);
+            this.initAssemblyModel(this.assemblyManager);
+          }
 
           // Automatically switch to Net Prep & Editor view
           const btnModeEditor = document.getElementById('btn-mode-editor');
@@ -817,14 +918,28 @@ class App {
     console.log(`[App] Regenerating CAD net with seed #${this.currentCadSeed}...`);
 
     try {
-      const foldJson = NetUnfolder.unfoldToFoldJSON(
-        this.currentCadPlanarData.vertices,
-        this.currentCadPlanarData.facesVertices,
-        this.currentCadSeed
-      );
-      foldJson.file_title = this.currentCadPlanarData.title;
-      this.updateRegenButtonUI(true);
-      this.initFoldModel(foldJson);
+      if (this.currentCadPlanarData.isAssembly) {
+        const assemblyPayload = NetUnfolder.unfoldAssemblyToFold(
+          this.currentCadPlanarData.components,
+          this.currentCadSeed
+        );
+        this.assemblyManager.loadAssembly(assemblyPayload);
+        this.updateRegenButtonUI(true);
+        this.initAssemblyModel(this.assemblyManager);
+      } else {
+        const comp = this.currentCadPlanarData.components ? this.currentCadPlanarData.components[0] : this.currentCadPlanarData;
+        const foldJson = NetUnfolder.unfoldToFoldJSON(
+          comp.vertices,
+          comp.facesVertices,
+          this.currentCadSeed,
+          500,
+          { componentId: comp.id || 'part_0', bbox: comp.bbox, center: comp.center, name: this.currentCadPlanarData.title }
+        );
+        foldJson.file_title = this.currentCadPlanarData.title;
+        this.assemblyManager.loadAssembly(foldJson);
+        this.updateRegenButtonUI(true);
+        this.initAssemblyModel(this.assemblyManager);
+      }
     } catch (err) {
       console.error('Regeneration error:', err);
       alert(`Could not generate net with seed #${this.currentCadSeed}: ${err.message}`);
@@ -912,31 +1027,37 @@ class App {
   updateInspectorUI() {
     if (!this.foldData) return;
 
-    document.getElementById('meta-title').textContent = this.foldData.title;
-    document.getElementById('meta-creator').textContent = this.foldData.creator;
-    document.getElementById('meta-spec').textContent = `v${this.foldData.spec}`;
+    if (this.foldData.title) document.getElementById('meta-title').textContent = this.foldData.title;
+    if (this.foldData.creator) document.getElementById('meta-creator').textContent = this.foldData.creator;
+    if (this.foldData.spec) document.getElementById('meta-spec').textContent = `v${this.foldData.spec}`;
 
-    document.getElementById('stat-vertices').textContent = this.foldData.counts.vertices;
-    document.getElementById('stat-edges').textContent = this.foldData.counts.edges;
-    document.getElementById('stat-faces').textContent = this.foldData.counts.faces;
+    if (this.foldData.counts) {
+      document.getElementById('stat-vertices').textContent = this.foldData.counts.vertices ?? 0;
+      document.getElementById('stat-edges').textContent = this.foldData.counts.edges ?? 0;
+      document.getElementById('stat-faces').textContent = this.foldData.counts.faces ?? 0;
 
-    document.getElementById('stat-boundary').textContent = this.foldData.counts.boundary;
-    document.getElementById('stat-valley').textContent = this.foldData.counts.valley;
-    document.getElementById('stat-mountain').textContent = this.foldData.counts.mountain;
-    document.getElementById('stat-cut').textContent = this.foldData.counts.cut;
-    document.getElementById('stat-flat').textContent = this.foldData.counts.flat;
-    document.getElementById('stat-unassigned').textContent = this.foldData.counts.unassigned;
+      document.getElementById('stat-boundary').textContent = this.foldData.counts.boundary ?? 0;
+      document.getElementById('stat-valley').textContent = this.foldData.counts.valley ?? 0;
+      document.getElementById('stat-mountain').textContent = this.foldData.counts.mountain ?? 0;
+      document.getElementById('stat-cut').textContent = this.foldData.counts.cut ?? 0;
+      document.getElementById('stat-flat').textContent = this.foldData.counts.flat ?? 0;
+      document.getElementById('stat-unassigned').textContent = this.foldData.counts.unassigned ?? 0;
+    }
 
     // Populate Root Face selector
     const rootFaceSelect = document.getElementById('root-face-select');
-    rootFaceSelect.innerHTML = '';
-    this.foldData.facesVertices.forEach((_, fIdx) => {
-      const opt = document.createElement('option');
-      opt.value = fIdx;
-      opt.textContent = `Face #${fIdx} ${fIdx === this.kinematics.rootFaceIndex ? '(Root Base)' : ''}`;
-      if (fIdx === this.kinematics.rootFaceIndex) opt.selected = true;
-      rootFaceSelect.appendChild(opt);
-    });
+    if (rootFaceSelect) {
+      rootFaceSelect.innerHTML = '';
+      const facesList = this.foldData.facesVertices || this.foldData.faces_vertices || [];
+      const rootIdx = this.kinematics ? this.kinematics.rootFaceIndex : 0;
+      facesList.forEach((_, fIdx) => {
+        const opt = document.createElement('option');
+        opt.value = fIdx;
+        opt.textContent = `Face #${fIdx} ${fIdx === rootIdx ? '(Root Base)' : ''}`;
+        if (fIdx === rootIdx) opt.selected = true;
+        rootFaceSelect.appendChild(opt);
+      });
+    }
   }
 
   startAnimationLoop() {
