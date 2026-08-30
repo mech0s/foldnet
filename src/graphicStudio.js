@@ -40,6 +40,14 @@ export class GraphicStudio {
     this.activeStamp = 'fragile';
     this.selectedArtwork = null;
 
+    // Grid & Snapping properties
+    this.showGrid = true;
+    this.snapEnabled = true;
+    this.overallScale = 100;
+    this.gridSize = 2;
+    this.standaloneFontSize = 10;
+    this.snapDistance = 1.2;
+
     // Canvas view state (pan & zoom)
     this.zoom = 2.0;
     this.panX = 0;
@@ -81,6 +89,10 @@ export class GraphicStudio {
               <span id="lbl-studio-zoom">200%</span>
               <button id="btn-studio-zoom-in" class="btn-icon" title="Zoom In (Scroll Up)">+</button>
               <button id="btn-studio-zoom-fit" class="btn-sm btn-secondary" title="Reset View">Fit</button>
+            </div>
+            <div class="snapping-toolbar-group" style="display: flex; gap: 4px; margin-left: 8px;">
+              <button id="btn-studio-toggle-grid" class="btn btn-sm btn-secondary active" title="Toggle Grid (1/50th of assembly scale)"># Grid</button>
+              <button id="btn-studio-toggle-snap" class="btn btn-sm btn-secondary active" title="Toggle Snap (Hold Ctrl while drawing to bypass)">🧲 Snap</button>
             </div>
           </div>
 
@@ -205,7 +217,7 @@ export class GraphicStudio {
                   <path d="M 20 0 L 0 0 0 20" fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="1" />
                 </pattern>
               </defs>
-              <rect width="100%" height="100%" fill="url(#grid-pattern)" />
+              <rect id="studio-grid-rect" width="100%" height="100%" fill="url(#grid-pattern)" />
               <g id="cluster-root-group"></g>
             </svg>
 
@@ -422,6 +434,40 @@ export class GraphicStudio {
       });
     }
 
+    const gridToggleBtn = this.container.querySelector('#btn-studio-toggle-grid');
+    if (gridToggleBtn) {
+      gridToggleBtn.addEventListener('click', () => {
+        this.showGrid = !this.showGrid;
+        gridToggleBtn.classList.toggle('active', this.showGrid);
+        const gridRect = this.container.querySelector('#studio-grid-rect');
+        if (gridRect) gridRect.style.display = this.showGrid ? 'block' : 'none';
+      });
+    }
+
+    const snapToggleBtn = this.container.querySelector('#btn-studio-toggle-snap');
+    if (snapToggleBtn) {
+      snapToggleBtn.addEventListener('click', () => {
+        this.snapEnabled = !this.snapEnabled;
+        snapToggleBtn.classList.toggle('active', this.snapEnabled);
+      });
+    }
+
+    // Zoom & View controls
+    const zoomInBtn = this.container.querySelector('#btn-studio-zoom-in');
+    if (zoomInBtn) {
+      zoomInBtn.addEventListener('click', () => this.zoomIn());
+    }
+
+    const zoomOutBtn = this.container.querySelector('#btn-studio-zoom-out');
+    if (zoomOutBtn) {
+      zoomOutBtn.addEventListener('click', () => this.zoomOut());
+    }
+
+    const zoomFitBtn = this.container.querySelector('#btn-studio-zoom-fit');
+    if (zoomFitBtn) {
+      zoomFitBtn.addEventListener('click', () => this.fitView());
+    }
+
     // Actions
     this.container.querySelector('#btn-studio-undo').addEventListener('click', () => this.undo());
     this.container.querySelector('#btn-studio-clear').addEventListener('click', () => this.clearActiveFace());
@@ -431,6 +477,7 @@ export class GraphicStudio {
     this.svgElement.addEventListener('pointerdown', (e) => this.onPointerDown(e));
     this.svgElement.addEventListener('pointermove', (e) => this.onPointerMove(e));
     this.svgElement.addEventListener('pointerup', (e) => this.onPointerUp(e));
+    this.svgElement.addEventListener('pointerleave', () => this.updateSnapIndicator({ isSnapped: false }));
     this.svgElement.addEventListener('wheel', (e) => this.onWheel(e), { passive: false });
 
     // Keyboard shortcuts
@@ -581,6 +628,21 @@ export class GraphicStudio {
     const netH = Math.max(maxY - minY, 0.01);
     const maxDim = Math.max(netW, netH);
 
+    // Compute overall scale of the assembly
+    let overallScale = maxDim;
+    if (this.assemblyManager && this.assemblyManager.globalBBox) {
+      const gb = this.assemblyManager.globalBBox;
+      const bScale = Math.max(gb.max.x - gb.min.x, gb.max.y - gb.min.y, gb.max.z - gb.min.z);
+      if (bScale > 0 && isFinite(bScale)) overallScale = bScale;
+    }
+    if (overallScale <= 0 || !isFinite(overallScale)) overallScale = 100;
+
+    this.overallScale = overallScale;
+    this.gridSize = overallScale / 50.0;
+    this.standaloneFontSize = overallScale / 10.0;
+    this.snapDistance = this.gridSize * 0.6;
+    this.updateGridPattern();
+
     // Calculate approximate focus face diameter
     const numFaces = this.foldData.facesVertices.length || 1;
     const approxFaceDim = Math.max(maxDim / Math.sqrt(numFaces), 0.01);
@@ -594,8 +656,232 @@ export class GraphicStudio {
 
     // Set zoom safely clamped across large CAD units (e.g. 500mm) and tiny units (e.g. unit cube = 1.0)
     this.zoom = Math.max(0.01, Math.min(2000.0, computedZoom));
+    this.fitZoom = this.zoom;
     this.minZoom = this.zoom * 0.05;
     this.maxZoom = this.zoom * 50.0;
+    this.updateZoomLabel();
+  }
+
+  zoomIn(factor = 1.25) {
+    const maxZ = this.maxZoom || 10000.0;
+    this.zoom = Math.min(maxZ, this.zoom * factor);
+    this.updateZoomLabel();
+    this.updateGridPattern();
+    this.renderClusterSVG();
+  }
+
+  zoomOut(factor = 0.8) {
+    const minZ = this.minZoom || 0.001;
+    this.zoom = Math.max(minZ, this.zoom * factor);
+    this.updateZoomLabel();
+    this.updateGridPattern();
+    this.renderClusterSVG();
+  }
+
+  fitView() {
+    this.panX = 0;
+    this.panY = 0;
+    if (this.currentCluster && this.currentCluster.clusterFaces && this.currentCluster.clusterFaces.length > 0) {
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      this.currentCluster.clusterFaces.forEach(f => {
+        f.polygon.forEach(pt => {
+          if (pt[0] < minX) minX = pt[0];
+          if (pt[0] > maxX) maxX = pt[0];
+          if (pt[1] < minY) minY = pt[1];
+          if (pt[1] > maxY) maxY = pt[1];
+        });
+      });
+      const clusterW = Math.max(maxX - minX, 0.01);
+      const clusterH = Math.max(maxY - minY, 0.01);
+      const rect = this.svgElement.getBoundingClientRect();
+      const availW = Math.max(rect.width - 120, 200);
+      const availH = Math.max(rect.height - 120, 200);
+      const fitZ = Math.min(availW / clusterW, availH / clusterH);
+      this.zoom = Math.max(0.001, Math.min(5000.0, fitZ));
+    } else {
+      this.autoFitZoom();
+    }
+    this.updateZoomLabel();
+    this.updateGridPattern();
+    this.renderClusterSVG();
+  }
+
+  updateZoomLabel() {
+    const lbl = this.container.querySelector('#lbl-studio-zoom');
+    if (lbl) {
+      const base = this.fitZoom || 1;
+      const pct = Math.round((this.zoom / base) * 100);
+      lbl.textContent = `${pct}%`;
+    }
+  }
+
+  updateGridPattern() {
+    const pattern = this.container.querySelector('#grid-pattern');
+    if (pattern) {
+      pattern.setAttribute('width', this.gridSize);
+    pattern.setAttribute('height', this.gridSize);
+      pattern.innerHTML = `<path d="M ${this.gridSize} 0 L 0 0 0 ${this.gridSize}" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="${Math.max(0.001, 1 / (this.zoom || 1))}" />`;
+    }
+    const gridRect = this.container.querySelector('#studio-grid-rect');
+    if (gridRect) {
+      gridRect.style.display = this.showGrid ? 'block' : 'none';
+    }
+  }
+
+  getSnappedCoords(pos, ctrlKey = false) {
+    if (ctrlKey || !this.snapEnabled) {
+      return { x: pos.x, y: pos.y, isSnapped: false, type: 'none' };
+    }
+
+    const candidateTargets = [];
+
+    // Helper: Project point onto line segment
+    const projectOnSegment = (px, py, ax, ay, bx, by) => {
+      const dx = bx - ax;
+      const dy = by - ay;
+      const lenSq = dx * dx + dy * dy;
+      if (lenSq < 1e-10) return { x: ax, y: ay, t: 0, dist: Math.hypot(px - ax, py - ay) };
+      const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lenSq));
+      const projX = ax + t * dx;
+      const projY = ay + t * dy;
+      const dist = Math.hypot(px - projX, py - projY);
+      return { x: projX, y: projY, t, dist };
+    };
+
+    // 1. Face vertices and Face edges of all cluster faces
+    if (this.currentCluster && this.currentCluster.clusterFaces) {
+      this.currentCluster.clusterFaces.forEach(f => {
+        const poly = f.polygon;
+        // Vertices
+        poly.forEach(pt => {
+          candidateTargets.push({ x: pt[0], y: pt[1], type: 'vertex', priority: 1 });
+        });
+        // Edges
+        for (let i = 0; i < poly.length; i++) {
+          const p1 = poly[i];
+          const p2 = poly[(i + 1) % poly.length];
+          const proj = projectOnSegment(pos.x, pos.y, p1[0], p1[1], p2[0], p2[1]);
+          if (proj.dist <= this.snapDistance) {
+            if (proj.t < 0.05) {
+              candidateTargets.push({ x: p1[0], y: p1[1], type: 'vertex', priority: 1 });
+            } else if (proj.t > 0.95) {
+              candidateTargets.push({ x: p2[0], y: p2[1], type: 'vertex', priority: 1 });
+            } else {
+              candidateTargets.push({ x: proj.x, y: proj.y, type: 'edge', priority: 2 });
+            }
+          }
+        }
+      });
+    }
+
+    // 2. Graphic element vertices, edges & center key points in current cluster
+    if (this.currentCluster && this.currentCluster.clusterFaces) {
+      this.currentCluster.clusterFaces.forEach(f => {
+        const artworks = this.faceArtworks.get(f.faceIndex) || [];
+        artworks.forEach(art => {
+          const m = art.clusterToNet ? CrossSeamMapper.composeAffine(f.netToCluster, art.clusterToNet) : { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
+          if (art.type === 'rect') {
+            const p1 = CrossSeamMapper.applyAffine(m, art.x, art.y);
+            const p2 = CrossSeamMapper.applyAffine(m, art.x + art.width, art.y);
+            const p3 = CrossSeamMapper.applyAffine(m, art.x + art.width, art.y + art.height);
+            const p4 = CrossSeamMapper.applyAffine(m, art.x, art.y + art.height);
+            const pc = CrossSeamMapper.applyAffine(m, art.x + art.width / 2, art.y + art.height / 2);
+
+            // Corners & Center
+            candidateTargets.push({ x: p1.x, y: p1.y, type: 'element', priority: 1 });
+            candidateTargets.push({ x: p2.x, y: p2.y, type: 'element', priority: 1 });
+            candidateTargets.push({ x: p3.x, y: p3.y, type: 'element', priority: 1 });
+            candidateTargets.push({ x: p4.x, y: p4.y, type: 'element', priority: 1 });
+            candidateTargets.push({ x: pc.x, y: pc.y, type: 'element-center', priority: 1.5 });
+
+            // Rect border edges
+            const rectEdges = [[p1, p2], [p2, p3], [p3, p4], [p4, p1]];
+            rectEdges.forEach(([e1, e2]) => {
+              const proj = projectOnSegment(pos.x, pos.y, e1.x, e1.y, e2.x, e2.y);
+              if (proj.dist <= this.snapDistance && proj.t >= 0.05 && proj.t <= 0.95) {
+                candidateTargets.push({ x: proj.x, y: proj.y, type: 'edge', priority: 2 });
+              }
+            });
+          } else if (art.type === 'circle') {
+            const pc = CrossSeamMapper.applyAffine(m, art.cx, art.cy);
+            candidateTargets.push({ x: pc.x, y: pc.y, type: 'element-center', priority: 1.5 });
+
+            // Circle circumference closest point
+            const cDist = Math.hypot(pos.x - pc.x, pos.y - pc.y);
+            if (cDist > 1e-6) {
+              const circX = pc.x + (art.r * (pos.x - pc.x)) / cDist;
+              const circY = pc.y + (art.r * (pos.y - pc.y)) / cDist;
+              candidateTargets.push({ x: circX, y: circY, type: 'edge', priority: 2 });
+            }
+          } else if (art.type === 'text') {
+            const pt = CrossSeamMapper.applyAffine(m, art.x, art.y);
+            candidateTargets.push({ x: pt.x, y: pt.y, type: 'element', priority: 1 });
+          }
+        });
+      });
+    }
+
+    // 3. Nearest Grid point (ONLY active when Grid is toggled ON)
+    if (this.showGrid) {
+      const gx = Math.round(pos.x / this.gridSize) * this.gridSize;
+      const gy = Math.round(pos.y / this.gridSize) * this.gridSize;
+      candidateTargets.push({ x: gx, y: gy, type: 'grid', priority: 3 });
+    }
+
+    // Find best target within snapDistance, preferring higher priority (vertices > edges > grid)
+    let bestTarget = null;
+    let bestDist = this.snapDistance;
+
+    for (const t of candidateTargets) {
+      const dist = Math.hypot(t.x - pos.x, t.y - pos.y);
+      if (dist <= bestDist) {
+        if (!bestTarget) {
+          bestTarget = t;
+          bestDist = dist;
+        } else if (t.priority < bestTarget.priority) {
+          // Strictly higher priority target (e.g. vertex over edge, edge over grid)
+          bestTarget = t;
+          bestDist = dist;
+        } else if (t.priority === bestTarget.priority && dist < bestDist) {
+          // Same priority but closer
+          bestTarget = t;
+          bestDist = dist;
+        }
+      }
+    }
+
+    if (bestTarget) {
+      return { x: bestTarget.x, y: bestTarget.y, isSnapped: true, type: bestTarget.type };
+    }
+    return { x: pos.x, y: pos.y, isSnapped: false, type: 'none' };
+  }
+
+  updateSnapIndicator(snapResult) {
+    let ind = this.rootGroup ? this.rootGroup.querySelector('#studio-snap-indicator') : null;
+    if (!snapResult || !snapResult.isSnapped) {
+      if (ind) ind.remove();
+      return;
+    }
+
+    if (!ind && this.rootGroup) {
+      ind = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      ind.setAttribute('id', 'studio-snap-indicator');
+      this.rootGroup.appendChild(ind);
+    }
+
+    if (ind) {
+      const ringRadius = Math.max(0.01, 7 / (this.zoom || 1));
+      const strokeW = `${Math.max(1, 2 / (this.zoom || 1))}px`;
+      let color = '#38bdf8'; // Cyan for vertex
+      if (snapResult.type === 'edge') color = '#34d399'; // Emerald for edge
+      else if (snapResult.type === 'grid') color = '#a855f7'; // Purple for grid
+      else if (snapResult.type === 'element' || snapResult.type === 'element-center') color = '#f59e0b'; // Amber
+
+      ind.innerHTML = `
+        <circle cx="${snapResult.x}" cy="${snapResult.y}" r="${ringRadius}" fill="none" stroke="${color}" stroke-width="${strokeW}" vector-effect="non-scaling-stroke" opacity="0.9" />
+        <circle cx="${snapResult.x}" cy="${snapResult.y}" r="${ringRadius * 0.35}" fill="${color}" stroke="none" />
+      `;
+    }
   }
 
   setFocusFace(faceIdx, cameraUp = null) {
@@ -921,7 +1207,9 @@ export class GraphicStudio {
       return;
     }
 
-    const pos = this.getCanvasCoords(e);
+    const rawPos = this.getCanvasCoords(e);
+    const snap = this.getSnappedCoords(rawPos, e.ctrlKey);
+    const pos = { x: snap.x, y: snap.y };
     const unitScale = this.modelUnitScale || 1;
     this.isDrawing = true;
     this.drawStart = pos;
@@ -941,13 +1229,14 @@ export class GraphicStudio {
       this.selectActiveArtwork(spec);
       this.isDrawing = false;
     } else if (this.activeTool === 'text') {
+      const fontSize = this.standaloneFontSize || 24 * unitScale;
       const spec = {
         id: 'art_' + Date.now() + '_' + Math.floor(Math.random() * 10000),
         type: 'text',
         text: this.textValue || 'TEXT',
         x: pos.x,
         y: pos.y,
-        fontSize: this.fontSize || 24,
+        fontSize: fontSize,
         unitScale: unitScale,
         fill: 'transparent',
         fontColor: this.fontColor || '#ffffff',
@@ -969,8 +1258,12 @@ export class GraphicStudio {
       return;
     }
 
+    const rawPos = this.getCanvasCoords(e);
+    const snap = this.getSnappedCoords(rawPos, e.ctrlKey);
+    this.updateSnapIndicator(snap);
+    const pos = { x: snap.x, y: snap.y };
+
     if (!this.isDrawing || !this.drawStart) return;
-    const pos = this.getCanvasCoords(e);
     const unitScale = this.modelUnitScale || 1;
 
     // Live preview during drag
@@ -1009,8 +1302,12 @@ export class GraphicStudio {
       return;
     }
 
+    const rawPos = this.getCanvasCoords(e);
+    const snap = this.getSnappedCoords(rawPos, e.ctrlKey);
+    this.updateSnapIndicator({ isSnapped: false });
+    const pos = { x: snap.x, y: snap.y };
+
     if (!this.isDrawing || !this.drawStart) return;
-    const pos = this.getCanvasCoords(e);
     const unitScale = this.modelUnitScale || 1;
     this.isDrawing = false;
 
@@ -1066,9 +1363,11 @@ export class GraphicStudio {
   onWheel(e) {
     e.preventDefault();
     const zoomFactor = e.deltaY < 0 ? 1.15 : 0.85;
-    const minZ = this.minZoom || 0.01;
-    const maxZ = this.maxZoom || 5000.0;
+    const minZ = this.minZoom || 0.001;
+    const maxZ = this.maxZoom || 10000.0;
     this.zoom = Math.max(minZ, Math.min(maxZ, this.zoom * zoomFactor));
+    this.updateZoomLabel();
+    this.updateGridPattern();
     this.renderClusterSVG();
   }
 

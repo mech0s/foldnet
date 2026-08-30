@@ -1027,6 +1027,18 @@ body {
   z-index: 15;
 }
 
+.snapping-toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.snapping-toolbar-group .btn.active {
+  background: rgba(99, 102, 241, 0.25);
+  border-color: var(--primary-accent);
+  color: #ffffff;
+}
+
 .studio-layout {
   flex: 1;
   display: flex;
