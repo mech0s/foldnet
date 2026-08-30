@@ -33,11 +33,12 @@ export class GraphicStudio {
 
     // Properties
     this.fillColor = '#3b82f6';
-    this.strokeColor = '#ffffff';
-    this.strokeWidth = 2;
-    this.textValue = 'BOX LOGO';
-    this.fontSize = 24;
+    this.fontColor = '#ffffff';
+    this.activeColorTab = 'fill'; // Default tab is Fill
+    this.textAlign = 'center';
+    this.textValue = '';
     this.activeStamp = 'fragile';
+    this.selectedArtwork = null;
 
     // Canvas view state (pan & zoom)
     this.zoom = 2.0;
@@ -60,60 +61,61 @@ export class GraphicStudio {
     this.onTextureUpdate = options.onTextureUpdate || null;
     this.onFocusChange = options.onFocusChange || null;
 
-    this.initUI();
+    this.buildStudioLayout();
     this.bindEvents();
   }
 
-  initUI() {
+  buildStudioLayout() {
     this.container.innerHTML = `
       <div class="studio-wrapper">
-        <!-- Graphic Studio Top Toolbar (matching Net Editor layout) -->
-        <div class="studio-top-toolbar">
-          <div class="toolbar-section">
-            <span class="toolbar-label">Graphic Studio:</span>
-            <span class="cluster-badge">Focus Face: <strong id="lbl-focus-face">F0</strong></span>
-            <span class="cluster-legend">
-              <span class="legend-item"><span class="dot fold-dot"></span> Fold Hinge</span>
-              <span class="legend-item"><span class="dot cut-dot"></span> 3D Seam (Cut Line)</span>
-            </span>
+        <!-- Top Toolbar -->
+        <header class="studio-top-toolbar">
+          <div class="header-left">
+            <span class="cluster-badge">Neighbor Cluster Canvas</span>
+            <span class="current-face-indicator">Focus Face: <strong id="lbl-focus-face">F0</strong></span>
           </div>
 
-          <div class="toolbar-section">
-            <span class="toolbar-label">Unpack Depth:</span>
-            <select id="studio-depth-select" class="custom-select custom-select-sm" title="Cardinal Unpack Depth">
-              <option value="1" selected>1</option>
-              <option value="2">2</option>
-              <option value="3">3</option>
-              <option value="999">Max</option>
-            </select>
+          <div class="header-center">
+            <div class="zoom-indicator">
+              <button id="btn-studio-zoom-out" class="btn-icon" title="Zoom Out (Scroll Down)">-</button>
+              <span id="lbl-studio-zoom">200%</span>
+              <button id="btn-studio-zoom-in" class="btn-icon" title="Zoom In (Scroll Up)">+</button>
+              <button id="btn-studio-zoom-fit" class="btn-sm btn-secondary" title="Reset View">Fit</button>
+            </div>
           </div>
 
-          <div class="toolbar-section right">
-            <button id="btn-studio-toggle-preview" class="btn btn-secondary active" title="Toggle Pop-Out Live 3D Preview Sidebar">
-              <span>👁️ 3D Preview</span>
+          <div class="header-right">
+            <label class="depth-select-label" title="Cluster Expansion Depth">
+              <span>Neighbor Depth:</span>
+              <select id="studio-depth-select" class="custom-select-sm">
+                <option value="1" selected>1-Hop (Adjacent)</option>
+                <option value="2">2-Hops</option>
+                <option value="3">3-Hops</option>
+                <option value="4">4-Hops</option>
+              </select>
+            </label>
+            <button id="btn-studio-toggle-preview" class="btn btn-primary btn-sm" title="Toggle Live 3D Fold Preview">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                <circle cx="12" cy="12" r="3"></circle>
+              </svg>
+              <span>3D Preview</span>
             </button>
           </div>
-        </div>
+        </header>
 
-        <div id="studio-part-strip-container"></div>
-
+        <!-- Studio Main Workspace -->
         <div class="studio-layout">
-          <!-- Studio Left Toolbar -->
+          <!-- Left Tool Palette Sidebar -->
           <aside class="studio-toolbar">
             <div class="tool-section">
-              <span class="tool-section-title">Vector Tools</span>
+              <span class="tool-section-title">Draw Tools</span>
               <div class="tool-btn-group">
-                <button class="tool-btn" data-tool="select" title="Select & Move (V)">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M3 3l7 18 3-7 7-3L3 3z"></path>
-                  </svg>
-                  <span>Select</span>
-                </button>
                 <button class="tool-btn active" data-tool="rect" title="Rectangle (R)">
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
                   </svg>
-                  <span>Rect</span>
+                  <span>Rectangle</span>
                 </button>
                 <button class="tool-btn" data-tool="circle" title="Circle (C)">
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -138,21 +140,39 @@ export class GraphicStudio {
               </div>
             </div>
 
-            <div class="tool-section">
-              <span class="tool-section-title">Fill & Stroke</span>
-              <div class="color-row">
-                <label class="color-picker-label" title="Fill Color">
-                  <span>Fill:</span>
-                  <input type="color" id="studio-fill-color" value="#3b82f6" />
-                </label>
-                <label class="color-picker-label" title="Stroke Color">
-                  <span>Stroke:</span>
-                  <input type="color" id="studio-stroke-color" value="#ffffff" />
-                </label>
+            <!-- Color Selection Tabs & Swatch Palette -->
+            <div class="tool-section color-tabs-section">
+              <span class="tool-section-title">Color Palette</span>
+              <div class="color-tabs-header">
+                <button type="button" class="color-tab-btn active" data-color-tab="fill" id="tab-btn-fill">
+                  <span>Fill</span>
+                  <div class="tab-swatch-wrapper" title="Click to custom pick Fill color">
+                    <span class="tab-color-swatch" id="swatch-indicator-fill" style="background-color: ${this.fillColor};"></span>
+                    <input type="color" id="studio-fill-color" class="hidden-color-input" value="${this.fillColor}" />
+                  </div>
+                </button>
+                <button type="button" class="color-tab-btn" data-color-tab="font" id="tab-btn-font">
+                  <span>Font</span>
+                  <div class="tab-swatch-wrapper" title="Click to custom pick Font color">
+                    <span class="tab-color-swatch" id="swatch-indicator-font" style="background-color: ${this.fontColor};"></span>
+                    <input type="color" id="studio-font-color" class="hidden-color-input" value="${this.fontColor}" />
+                  </div>
+                </button>
               </div>
-              <div class="control-slider-group">
-                <label>Stroke Width: <span id="val-stroke-width">2px</span></label>
-                <input type="range" id="studio-stroke-width" min="0" max="10" value="2" />
+
+              <!-- Color Palette Container (stays open for active tab) -->
+              <div class="color-palette-body">
+                <div class="color-palette-grid" id="studio-color-palette"></div>
+              </div>
+            </div>
+
+            <div class="tool-section text-options">
+              <span class="tool-section-title">Text & Alignment</span>
+              <input type="text" id="studio-text-input" class="text-input" value="" placeholder="Type text for element..." />
+              <div class="text-align-group">
+                <button type="button" class="align-btn" data-align="left" title="Align Left">⇤ Left</button>
+                <button type="button" class="align-btn active" data-align="center" title="Align Center">↔ Center</button>
+                <button type="button" class="align-btn" data-align="right" title="Align Right">⇥ Right</button>
               </div>
             </div>
 
@@ -165,15 +185,6 @@ export class GraphicStudio {
                 <option value="barcode">📊 Barcode & QR</option>
                 <option value="star">⭐ Quality Seal</option>
               </select>
-            </div>
-
-            <div class="tool-section text-options" style="display: none;">
-              <span class="tool-section-title">Text Options</span>
-              <input type="text" id="studio-text-input" class="text-input" value="BOX LOGO" placeholder="Enter text..." />
-              <div class="control-slider-group">
-                <label>Font Size: <span id="val-font-size">24px</span></label>
-                <input type="range" id="studio-font-size" min="12" max="64" value="24" />
-              </div>
             </div>
 
             <div class="tool-section">
@@ -303,34 +314,105 @@ export class GraphicStudio {
 
         // Toggle tool-specific options
         this.container.querySelector('.stamp-options').style.display = this.activeTool === 'stamp' ? 'block' : 'none';
-        this.container.querySelector('.text-options').style.display = this.activeTool === 'text' ? 'block' : 'none';
       });
     });
 
-    // Inputs
-    const fillInp = this.container.querySelector('#studio-fill-color');
-    fillInp.addEventListener('input', (e) => { this.fillColor = e.target.value; });
+    // Color Palette Swatches Rendering & Click Handlers
+    const paletteGrid = this.container.querySelector('#studio-color-palette');
+    const STUDIO_COLORS = [
+      '#ffffff', '#cbd5e1', '#64748b', '#1e293b', '#0f172a', '#000000',
+      '#ef4444', '#f97316', '#f59e0b', '#eab308', '#84cc16', '#10b981',
+      '#06b6d4', '#0ea5e9', '#3b82f6', '#6366f1', '#8b5cf6', '#d946ef',
+      '#f43f5e', '#854d0e', '#b45309', '#78350f', '#d97706', '#fbbf24'
+    ];
 
-    const strokeInp = this.container.querySelector('#studio-stroke-color');
-    strokeInp.addEventListener('input', (e) => { this.strokeColor = e.target.value; });
+    if (paletteGrid) {
+      paletteGrid.innerHTML = '';
+      STUDIO_COLORS.forEach(c => {
+        const swatchBtn = document.createElement('button');
+        swatchBtn.type = 'button';
+        swatchBtn.className = 'palette-swatch-btn';
+        swatchBtn.style.backgroundColor = c;
+        swatchBtn.setAttribute('data-color', c);
+        swatchBtn.title = c;
+        if (c.toLowerCase() === this.fillColor.toLowerCase()) {
+          swatchBtn.classList.add('active');
+        }
+        swatchBtn.addEventListener('click', () => {
+          this.applyColorFromPalette(c);
+        });
+        paletteGrid.appendChild(swatchBtn);
+      });
+    }
 
-    const strokeWidthInp = this.container.querySelector('#studio-stroke-width');
-    strokeWidthInp.addEventListener('input', (e) => {
-      this.strokeWidth = parseInt(e.target.value, 10);
-      this.container.querySelector('#val-stroke-width').textContent = `${this.strokeWidth}px`;
+    // Color Tabs (Fill / Font)
+    const colorTabBtns = this.container.querySelectorAll('.color-tab-btn');
+    colorTabBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        colorTabBtns.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        this.activeColorTab = btn.getAttribute('data-color-tab') || 'fill';
+        this.updatePaletteHighlight();
+      });
     });
 
-    const textInp = this.container.querySelector('#studio-text-input');
-    textInp.addEventListener('input', (e) => { this.textValue = e.target.value; });
+    // Native Color Inputs
+    const fillInp = this.container.querySelector('#studio-fill-color');
+    if (fillInp) {
+      fillInp.addEventListener('input', (e) => {
+        this.fillColor = e.target.value;
+        const swatch = this.container.querySelector('#swatch-indicator-fill');
+        if (swatch) swatch.style.backgroundColor = this.fillColor;
+        this.updatePaletteHighlight();
+        if (this.selectedArtwork) {
+          this.selectedArtwork.fill = this.fillColor;
+          this.syncArtworkUpdate(this.selectedArtwork);
+        }
+      });
+    }
 
-    const fontSizeInp = this.container.querySelector('#studio-font-size');
-    fontSizeInp.addEventListener('input', (e) => {
-      this.fontSize = parseInt(e.target.value, 10);
-      this.container.querySelector('#val-font-size').textContent = `${this.fontSize}px`;
+    const fontColorInp = this.container.querySelector('#studio-font-color');
+    if (fontColorInp) {
+      fontColorInp.addEventListener('input', (e) => {
+        this.fontColor = e.target.value;
+        const swatch = this.container.querySelector('#swatch-indicator-font');
+        if (swatch) swatch.style.backgroundColor = this.fontColor;
+        this.updatePaletteHighlight();
+        if (this.selectedArtwork) {
+          this.selectedArtwork.fontColor = this.fontColor;
+          this.syncArtworkUpdate(this.selectedArtwork);
+        }
+      });
+    }
+
+    const textInp = this.container.querySelector('#studio-text-input');
+    if (textInp) {
+      textInp.addEventListener('input', (e) => {
+        this.textValue = e.target.value;
+        if (this.selectedArtwork) {
+          this.selectedArtwork.text = this.textValue;
+          this.syncArtworkUpdate(this.selectedArtwork);
+        }
+      });
+    }
+
+    const alignBtns = this.container.querySelectorAll('.align-btn');
+    alignBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        alignBtns.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        this.textAlign = btn.getAttribute('data-align') || 'center';
+        if (this.selectedArtwork) {
+          this.selectedArtwork.textAlign = this.textAlign;
+          this.syncArtworkUpdate(this.selectedArtwork);
+        }
+      });
     });
 
     const stampSelect = this.container.querySelector('#studio-stamp-select');
-    stampSelect.addEventListener('change', (e) => { this.activeStamp = e.target.value; });
+    if (stampSelect) {
+      stampSelect.addEventListener('change', (e) => { this.activeStamp = e.target.value; });
+    }
 
     const depthSelect = this.container.querySelector('#studio-depth-select');
     if (depthSelect) {
@@ -360,6 +442,91 @@ export class GraphicStudio {
         }
       }
     });
+  }
+
+  applyColorFromPalette(color) {
+    if (this.activeColorTab === 'font') {
+      this.fontColor = color;
+      const fontInp = this.container.querySelector('#studio-font-color');
+      if (fontInp) fontInp.value = color;
+      const swatch = this.container.querySelector('#swatch-indicator-font');
+      if (swatch) swatch.style.backgroundColor = color;
+      if (this.selectedArtwork) {
+        this.selectedArtwork.fontColor = color;
+        this.syncArtworkUpdate(this.selectedArtwork);
+      }
+    } else {
+      this.fillColor = color;
+      const fillInp = this.container.querySelector('#studio-fill-color');
+      if (fillInp) fillInp.value = color;
+      const swatch = this.container.querySelector('#swatch-indicator-fill');
+      if (swatch) swatch.style.backgroundColor = color;
+      if (this.selectedArtwork) {
+        this.selectedArtwork.fill = color;
+        this.syncArtworkUpdate(this.selectedArtwork);
+      }
+    }
+    this.updatePaletteHighlight();
+  }
+
+  updatePaletteHighlight() {
+    const activeColor = (this.activeColorTab === 'font' ? this.fontColor : this.fillColor).toLowerCase();
+    const swatches = this.container.querySelectorAll('.palette-swatch-btn');
+    swatches.forEach(btn => {
+      const c = (btn.getAttribute('data-color') || '').toLowerCase();
+      btn.classList.toggle('active', c === activeColor);
+    });
+  }
+
+  syncArtworkUpdate(artwork) {
+    if (!artwork) return;
+    const artId = artwork.id;
+    if (artId) {
+      this.faceArtworks.forEach((list) => {
+        list.forEach(item => {
+          if (item.id === artId) {
+            item.text = artwork.text;
+            item.fill = artwork.fill;
+            item.fontColor = artwork.fontColor;
+            item.textAlign = artwork.textAlign;
+          }
+        });
+      });
+    }
+    this.renderClusterSVG();
+    this.notifyTextureUpdate();
+  }
+
+  selectActiveArtwork(spec) {
+    this.selectedArtwork = spec;
+    const textInp = this.container.querySelector('#studio-text-input');
+    if (textInp) {
+      textInp.value = spec.text || '';
+      textInp.focus();
+      textInp.select();
+    }
+    if (spec.fill && spec.fill !== 'transparent') {
+      this.fillColor = spec.fill;
+      const fillInp = this.container.querySelector('#studio-fill-color');
+      if (fillInp) fillInp.value = spec.fill;
+      const swatch = this.container.querySelector('#swatch-indicator-fill');
+      if (swatch) swatch.style.backgroundColor = spec.fill;
+    }
+    if (spec.fontColor) {
+      this.fontColor = spec.fontColor;
+      const fontInp = this.container.querySelector('#studio-font-color');
+      if (fontInp) fontInp.value = spec.fontColor;
+      const swatch = this.container.querySelector('#swatch-indicator-font');
+      if (swatch) swatch.style.backgroundColor = spec.fontColor;
+    }
+    this.updatePaletteHighlight();
+
+    if (spec.textAlign) {
+      this.textAlign = spec.textAlign;
+      this.container.querySelectorAll('.align-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.getAttribute('data-align') === spec.textAlign);
+      });
+    }
   }
 
   loadModel(foldData, kinematics = null, cadDualGraph = null, partIndex = 0) {
@@ -576,38 +743,121 @@ export class GraphicStudio {
     const unitScale = this.modelUnitScale || 1;
 
     if (spec.type === 'rect') {
-      elem = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-      elem.setAttribute('x', spec.x);
-      elem.setAttribute('y', spec.y);
-      elem.setAttribute('width', spec.width);
-      elem.setAttribute('height', spec.height);
+      const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      g.setAttribute('class', 'artwork-element');
+
+      const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      rect.setAttribute('x', spec.x);
+      rect.setAttribute('y', spec.y);
+      rect.setAttribute('width', spec.width);
+      rect.setAttribute('height', spec.height);
+      rect.setAttribute('fill', spec.fill || '#3b82f6');
+      rect.setAttribute('stroke', 'none');
+      g.appendChild(rect);
+
+      if (spec.text && spec.text.trim().length > 0) {
+        const padding = Math.min(spec.width, spec.height) * 0.08;
+        const maxW = Math.max(1, spec.width - padding * 2);
+        const maxH = Math.max(1, spec.height - padding * 2);
+        const fontSize = Math.max(2, Math.min(maxH * 0.85, maxW / Math.max(1, spec.text.length * 0.55)));
+
+        const align = spec.textAlign || 'center';
+        let textX = spec.x + spec.width / 2;
+        let anchor = 'middle';
+        if (align === 'left') {
+          textX = spec.x + padding;
+          anchor = 'start';
+        } else if (align === 'right') {
+          textX = spec.x + spec.width - padding;
+          anchor = 'end';
+        }
+        const textY = -(spec.y + spec.height / 2);
+
+        const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        text.setAttribute('x', textX);
+        text.setAttribute('y', textY);
+        text.setAttribute('transform', 'scale(1, -1)');
+        text.setAttribute('text-anchor', anchor);
+        text.setAttribute('dominant-baseline', 'central');
+        text.setAttribute('font-size', `${fontSize}px`);
+        text.setAttribute('font-weight', 'bold');
+        text.setAttribute('font-family', 'sans-serif');
+        text.setAttribute('fill', spec.fontColor || '#ffffff');
+        text.setAttribute('stroke', 'none');
+        text.textContent = spec.text;
+        g.appendChild(text);
+      }
+      elem = g;
     } else if (spec.type === 'circle') {
-      elem = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-      elem.setAttribute('cx', spec.cx);
-      elem.setAttribute('cy', spec.cy);
-      elem.setAttribute('r', spec.r);
+      const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      g.setAttribute('class', 'artwork-element');
+
+      const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      circle.setAttribute('cx', spec.cx);
+      circle.setAttribute('cy', spec.cy);
+      circle.setAttribute('r', spec.r);
+      circle.setAttribute('fill', spec.fill || '#3b82f6');
+      circle.setAttribute('stroke', 'none');
+      g.appendChild(circle);
+
+      if (spec.text && spec.text.trim().length > 0) {
+        const side = 1.414 * spec.r;
+        const padding = side * 0.08;
+        const maxW = Math.max(1, side - padding * 2);
+        const maxH = Math.max(1, side - padding * 2);
+        const fontSize = Math.max(2, Math.min(maxH * 0.85, maxW / Math.max(1, spec.text.length * 0.55)));
+
+        const align = spec.textAlign || 'center';
+        let textX = spec.cx;
+        let anchor = 'middle';
+        if (align === 'left') {
+          textX = spec.cx - (side / 2) + padding;
+          anchor = 'start';
+        } else if (align === 'right') {
+          textX = spec.cx + (side / 2) - padding;
+          anchor = 'end';
+        }
+        const textY = -spec.cy;
+
+        const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        text.setAttribute('x', textX);
+        text.setAttribute('y', textY);
+        text.setAttribute('transform', 'scale(1, -1)');
+        text.setAttribute('text-anchor', anchor);
+        text.setAttribute('dominant-baseline', 'central');
+        text.setAttribute('font-size', `${fontSize}px`);
+        text.setAttribute('font-weight', 'bold');
+        text.setAttribute('font-family', 'sans-serif');
+        text.setAttribute('fill', spec.fontColor || '#ffffff');
+        text.setAttribute('stroke', 'none');
+        text.textContent = spec.text;
+        g.appendChild(text);
+      }
+      elem = g;
     } else if (spec.type === 'text') {
       elem = document.createElementNS('http://www.w3.org/2000/svg', 'text');
       elem.setAttribute('x', spec.x);
       elem.setAttribute('y', -spec.y);
-      // Flip Y locally so text renders upright in scale(zoom, -zoom) container
       elem.setAttribute('transform', `scale(1, -1)`);
       elem.setAttribute('dominant-baseline', 'hanging');
+      elem.setAttribute('text-anchor', spec.textAlign === 'center' ? 'middle' : (spec.textAlign === 'right' ? 'end' : 'start'));
       elem.setAttribute('font-size', (spec.fontSize || 24) * unitScale);
       elem.setAttribute('font-weight', 'bold');
       elem.setAttribute('font-family', 'sans-serif');
+      elem.setAttribute('fill', spec.fontColor || spec.fill || '#ffffff');
+      elem.setAttribute('stroke', 'none');
+      elem.setAttribute('class', 'artwork-element');
       elem.textContent = spec.text;
     } else if (spec.type === 'stamp') {
       elem = this.createStampElement(spec);
     }
 
     if (elem) {
-      elem.setAttribute('fill', spec.fill || 'transparent');
-      elem.setAttribute('stroke', spec.stroke || 'none');
-      // When vector-effect="non-scaling-stroke" is active, stroke-width represents screen pixels directly
-      elem.setAttribute('stroke-width', `${spec.strokeWidth || 2}px`);
-      elem.setAttribute('vector-effect', 'non-scaling-stroke');
-      elem.setAttribute('class', 'artwork-element');
+      elem.style.cursor = 'pointer';
+      elem.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.selectActiveArtwork(spec);
+      });
     }
     return elem;
   }
@@ -678,6 +928,7 @@ export class GraphicStudio {
 
     if (this.activeTool === 'stamp') {
       const spec = {
+        id: 'art_' + Date.now() + '_' + Math.floor(Math.random() * 10000),
         type: 'stamp',
         stampType: this.activeStamp,
         x: pos.x - 30 * unitScale,
@@ -687,21 +938,25 @@ export class GraphicStudio {
         faceIndex: this.focusFaceIndex
       };
       this.addArtwork(spec);
+      this.selectActiveArtwork(spec);
       this.isDrawing = false;
     } else if (this.activeTool === 'text') {
       const spec = {
+        id: 'art_' + Date.now() + '_' + Math.floor(Math.random() * 10000),
         type: 'text',
-        text: this.textValue,
+        text: this.textValue || 'TEXT',
         x: pos.x,
         y: pos.y,
-        fontSize: this.fontSize,
+        fontSize: this.fontSize || 24,
         unitScale: unitScale,
-        fill: this.fillColor,
-        stroke: this.strokeColor,
-        strokeWidth: this.strokeWidth,
+        fill: 'transparent',
+        fontColor: this.fontColor || '#ffffff',
+        textAlign: this.textAlign || 'left',
+        stroke: 'none',
         faceIndex: this.focusFaceIndex
       };
       this.addArtwork(spec);
+      this.selectActiveArtwork(spec);
       this.isDrawing = false;
     }
   }
@@ -723,11 +978,9 @@ export class GraphicStudio {
     if (!previewElem) {
       previewElem = document.createElementNS('http://www.w3.org/2000/svg', this.activeTool === 'circle' ? 'circle' : 'rect');
       previewElem.setAttribute('id', 'draw-preview');
-      previewElem.setAttribute('fill', this.fillColor);
-      previewElem.setAttribute('stroke', this.strokeColor);
-      previewElem.setAttribute('stroke-width', `${this.strokeWidth || 2}px`);
-      previewElem.setAttribute('vector-effect', 'non-scaling-stroke');
-      previewElem.setAttribute('opacity', '0.6');
+      previewElem.setAttribute('fill', this.fillColor || '#3b82f6');
+      previewElem.setAttribute('stroke', 'none');
+      previewElem.setAttribute('opacity', '0.7');
       this.rootGroup.appendChild(previewElem);
     }
 
@@ -740,11 +993,13 @@ export class GraphicStudio {
       previewElem.setAttribute('y', y);
       previewElem.setAttribute('width', w);
       previewElem.setAttribute('height', h);
+      previewElem.setAttribute('fill', this.fillColor || '#3b82f6');
     } else if (this.activeTool === 'circle') {
       const r = Math.hypot(pos.x - this.drawStart.x, pos.y - this.drawStart.y);
       previewElem.setAttribute('cx', this.drawStart.x);
       previewElem.setAttribute('cy', this.drawStart.y);
       previewElem.setAttribute('r', r);
+      previewElem.setAttribute('fill', this.fillColor || '#3b82f6');
     }
   }
 
@@ -768,34 +1023,42 @@ export class GraphicStudio {
       // Min threshold scaled to coordinate units
       if (w > 0.01 * unitScale && h > 0.01 * unitScale) {
         const spec = {
+          id: 'art_' + Date.now() + '_' + Math.floor(Math.random() * 10000),
           type: 'rect',
           x: Math.min(this.drawStart.x, pos.x),
           y: Math.min(this.drawStart.y, pos.y),
           width: w,
           height: h,
-          fill: this.fillColor,
-          stroke: this.strokeColor,
-          strokeWidth: this.strokeWidth,
+          fill: this.fillColor || '#3b82f6',
+          stroke: 'none',
+          text: this.textValue || '',
+          fontColor: this.fontColor || '#ffffff',
+          textAlign: this.textAlign || 'center',
           unitScale: unitScale,
           faceIndex: this.focusFaceIndex
         };
         this.addArtwork(spec);
+        this.selectActiveArtwork(spec);
       }
     } else if (this.activeTool === 'circle') {
       const r = Math.hypot(pos.x - this.drawStart.x, pos.y - this.drawStart.y);
       if (r > 0.01 * unitScale) {
         const spec = {
+          id: 'art_' + Date.now() + '_' + Math.floor(Math.random() * 10000),
           type: 'circle',
           cx: this.drawStart.x,
           cy: this.drawStart.y,
           r,
-          fill: this.fillColor,
-          stroke: this.strokeColor,
-          strokeWidth: this.strokeWidth,
+          fill: this.fillColor || '#3b82f6',
+          stroke: 'none',
+          text: this.textValue || '',
+          fontColor: this.fontColor || '#ffffff',
+          textAlign: this.textAlign || 'center',
           unitScale: unitScale,
           faceIndex: this.focusFaceIndex
         };
         this.addArtwork(spec);
+        this.selectActiveArtwork(spec);
       }
     }
   }

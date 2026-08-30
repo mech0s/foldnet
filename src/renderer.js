@@ -594,8 +594,6 @@ export class FoldRenderer {
 
   /** Draws a single artwork spec onto a 2D canvas context (in cluster-space coordinates). */
   drawArtworkOnCanvas(ctx, item, sx = 512, sy = 512) {
-    // Normalizing stroke width: ctx transform scales by sx, so divide stroke width by sx to get exact canvas pixels
-    const sw = (item.strokeWidth || 2) / (sx || 512);
     const unitScale = item.unitScale || 1;
 
     if (item.type === 'rect') {
@@ -603,10 +601,28 @@ export class FoldRenderer {
         ctx.fillStyle = item.fill;
         ctx.fillRect(item.x, item.y, item.width, item.height);
       }
-      if (item.stroke && item.stroke !== 'none') {
-        ctx.strokeStyle = item.stroke;
-        ctx.lineWidth = sw;
-        ctx.strokeRect(item.x, item.y, item.width, item.height);
+      if (item.text && item.text.trim().length > 0) {
+        const padding = Math.min(item.width, item.height) * 0.08;
+        const maxW = Math.max(1, item.width - padding * 2);
+        const maxH = Math.max(1, item.height - padding * 2);
+        const fitSize = Math.max(2, Math.min(maxH * 0.85, maxW / Math.max(1, item.text.length * 0.55)));
+
+        const align = item.textAlign || 'center';
+        let textX = item.x + item.width / 2;
+        if (align === 'left') textX = item.x + padding;
+        else if (align === 'right') textX = item.x + item.width - padding;
+        const textY = item.y + item.height / 2;
+
+        ctx.save();
+        ctx.translate(textX, textY);
+        // Invert Y scale so text renders upright under the negative Y canvas transform
+        ctx.scale(1, -1);
+        ctx.fillStyle = item.fontColor || item.fill || '#ffffff';
+        ctx.font = `bold ${fitSize}px sans-serif`;
+        ctx.textAlign = align;
+        ctx.textBaseline = 'middle';
+        ctx.fillText(item.text, 0, 0);
+        ctx.restore();
       }
     } else if (item.type === 'circle') {
       ctx.beginPath();
@@ -615,20 +631,38 @@ export class FoldRenderer {
         ctx.fillStyle = item.fill;
         ctx.fill();
       }
-      if (item.stroke && item.stroke !== 'none') {
-        ctx.strokeStyle = item.stroke;
-        ctx.lineWidth = sw;
-        ctx.stroke();
+      if (item.text && item.text.trim().length > 0) {
+        const side = 1.414 * item.r;
+        const padding = side * 0.08;
+        const maxW = Math.max(1, side - padding * 2);
+        const maxH = Math.max(1, side - padding * 2);
+        const fitSize = Math.max(2, Math.min(maxH * 0.85, maxW / Math.max(1, item.text.length * 0.55)));
+
+        const align = item.textAlign || 'center';
+        let textX = item.cx;
+        if (align === 'left') textX = item.cx - (side / 2) + padding;
+        else if (align === 'right') textX = item.cx + (side / 2) - padding;
+        const textY = item.cy;
+
+        ctx.save();
+        ctx.translate(textX, textY);
+        ctx.scale(1, -1);
+        ctx.fillStyle = item.fontColor || item.fill || '#ffffff';
+        ctx.font = `bold ${fitSize}px sans-serif`;
+        ctx.textAlign = align;
+        ctx.textBaseline = 'middle';
+        ctx.fillText(item.text, 0, 0);
+        ctx.restore();
       }
     } else if (item.type === 'text') {
       ctx.save();
       ctx.translate(item.x, item.y);
       // Invert Y scale so text renders upright under the negative Y canvas transform
       ctx.scale(1, -1);
-      ctx.fillStyle = item.fill || '#ffffff';
+      ctx.fillStyle = item.fontColor || item.fill || '#ffffff';
       const fSize = (item.fontSize || 24) * unitScale;
       ctx.font = `bold ${fSize}px sans-serif`;
-      ctx.textAlign = 'left';
+      ctx.textAlign = item.textAlign || 'left';
       ctx.textBaseline = 'top';
       ctx.fillText(item.text || '', 0, 0);
       ctx.restore();
