@@ -56,54 +56,57 @@
         <div class="control-group">
           <label for="model-select">Model:</label>
           <select id="model-select" class="custom-select">
-            <option value="models/lid-cube.json">Six-Sided Cube Box Net with Attached Lid</option>
-            <option value="models/cube.json">Standard Cross Cube Net</option>
-            <option value="models/notched-cube.json">Notched Cube (Subcube Subtracted)</option>
-            <option value="models/subdivided-notched-cube.json" selected>3x3 Subdivided Notched Cube (216 Faces)</option>
+            <optgroup label="Sample FOLD Nets">
+              <option value="models/lid-cube.json">Cube Box Net with Lid</option>
+              <option value="models/cube.json">Standard Cross Cube</option>
+              <option value="models/notched-cube.json">Notched Cube</option>
+              <option value="models/subdivided-notched-cube.json" selected>3x3 Subdivided Notched Cube (216 Faces)</option>
+            </optgroup>
+            <optgroup label="Sample CAD Models">
+              <option value="models/box-shell.stl">Box Shell (Single Body STL)</option>
+              <option value="models/nested3.stl">Nested 3-Body Assembly (STL)</option>
+            </optgroup>
             <option value="custom">Custom File...</option>
           </select>
         </div>
 
-        <label class="btn btn-secondary upload-btn" title="Upload FOLD JSON or CAD Model file">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <label class="btn btn-secondary upload-btn" title="Open FOLD JSON or CAD Model (.json, .fold, .stl, .obj, .step, .stp)">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
             <polyline points="17 8 12 3 7 8"></polyline>
             <line x1="12" y1="3" x2="12" y2="15"></line>
           </svg>
-          <span>Open File</span>
+          <span>Open / Import</span>
           <input type="file" id="file-input" accept=".json,.fold,.obj,.stl,.step,.stp" hidden />
         </label>
-
-        <button id="btn-regen-cad" class="btn btn-secondary btn-regen-cad" style="display: none;" title="Regenerate Net layout using next pseudo-random seed">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polyline points="23 4 23 10 17 10"></polyline>
-            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
-          </svg>
-          <span id="btn-regen-label">Re-gen Net (Seed #1)</span>
-        </button>
 
         <div class="control-group">
           <label for="theme-select">Theme:</label>
           <select id="theme-select" class="custom-select">
-            <option value="highContrast" selected>☀️ High Contrast (Yellow / Cyan)</option>
-            <option value="cardboard">📦 Cardboard Craft</option>
+            <option value="highContrast" selected>☀️ High Contrast</option>
+            <option value="cardboard">📦 Cardboard</option>
             <option value="blueprint">📐 Blueprint</option>
             <option value="cyber">⚡ Cyber Neon</option>
             <option value="paper">📄 Origami Paper</option>
           </select>
         </div>
 
-        <button id="btn-export-glb" class="btn btn-secondary" title="Export current 3D Model with painted graphics as GLB (.glb)">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
-            <polyline points="7.5 4.21 12 6.81 16.5 4.21"></polyline>
-            <polyline points="7.5 19.79 7.5 14.6 3 12"></polyline>
-            <polyline points="21 12 16.5 14.6 16.5 19.79"></polyline>
-            <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
-            <line x1="12" y1="22.08" x2="12" y2="12"></line>
-          </svg>
-          <span>Export GLB</span>
-        </button>
+        <div class="export-btn-group">
+          <button id="btn-export-glb" class="btn btn-secondary" title="Export 3D Model with graphics as GLB (.glb)">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+            </svg>
+            <span>Export GLB</span>
+          </button>
+          <button id="btn-export-fold" class="btn btn-secondary" title="Export active 2D Net as FOLD 1.1 JSON (.json)">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+              <polyline points="17 21 17 13 7 13 7 21"></polyline>
+              <polyline points="7 3 7 8 15 8"></polyline>
+            </svg>
+            <span>Export JSON</span>
+          </button>
+        </div>
 
         <div class="btn-group">
           <button id="btn-toggle-inspector" class="btn btn-icon" title="Toggle Inspector Panel">
@@ -136,8 +139,8 @@
               <polyline points="17 8 12 3 7 8"></polyline>
               <line x1="12" y1="3" x2="12" y2="15"></line>
             </svg>
-            <h3>Drop FOLD file here to render</h3>
-            <p>Supports .json and .fold formats</p>
+            <h3>Drop file here to load</h3>
+            <p>Supports .json, .fold, .stl, .obj, .step, .stp</p>
           </div>
         </div>
 
@@ -185,6 +188,7 @@
       <!-- Net Preparation & Editor Workspace -->
       <div id="editor-workspace" class="workspace-panel active">
         <div class="editor-toolbar">
+          <!-- 1. Crease Directives Palette -->
           <div class="toolbar-section">
             <span class="toolbar-label">Paint Edge:</span>
             <div class="directive-palette">
@@ -197,47 +201,57 @@
             </div>
           </div>
 
-          <div class="toolbar-divider"></div>
-
-          <div class="toolbar-section">
-            <button id="btn-attach-face" class="btn btn-secondary" title="Attach quad face outward on selected edge">
-              <span>➕ Attach Face</span>
-            </button>
-            <button id="btn-auto-boundary" class="btn btn-secondary" title="Auto-detect outer perimeter edges as Boundary (B)">
-              <span>🪄 Auto-Boundary</span>
-            </button>
-            <button id="btn-invert-folds" class="btn btn-secondary" title="Invert Mountain & Valley folds (M ↔ V)">
-              <span>🔄 Invert Folds</span>
-            </button>
-            <button id="btn-flip-v" class="btn btn-secondary" title="Flip 2D Net Vertically (Top ↕ Bottom)">
-              <span>⇅ Flip V</span>
-            </button>
-            <button id="btn-flip-h" class="btn btn-secondary" title="Flip 2D Net Horizontally (Left ↔ Right)">
-              <span>⇄ Flip H</span>
-            </button>
-            <button id="btn-center-net" class="btn btn-secondary" title="Center 2D Net view">
-              <span>🎯 Center View</span>
-            </button>
-            <label class="btn btn-secondary upload-btn" title="Import 3D CAD Model (.obj, .stl, .step, .stp)">
-              <span>📥 Import CAD</span>
-              <input type="file" id="cad-file-input" accept=".obj,.stl,.step,.stp" hidden />
-            </label>
-            <button id="btn-editor-regen-cad" class="btn btn-secondary btn-regen-cad" style="display: none;" title="Regenerate Net layout using next pseudo-random seed">
-              <span id="btn-editor-regen-label">🎲 Re-gen Net (Seed #1)</span>
+          <!-- 2. CAD Net Layout / Generation (Contextual) -->
+          <div class="toolbar-section" id="editor-cad-section" style="display: none;">
+            <div class="toolbar-divider"></div>
+            <button id="btn-editor-regen-cad" class="btn btn-secondary btn-regen-cad btn-sm" title="Regenerate Net layout using next pseudo-random seed">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="23 4 23 10 17 10"></polyline>
+                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+              </svg>
+              <span id="btn-editor-regen-label">🎲 Re-gen (Seed #1)</span>
             </button>
           </div>
 
           <div class="toolbar-divider"></div>
 
+          <!-- 3. Net Topology & Face Operations -->
+          <div class="toolbar-section">
+            <button id="btn-attach-face" class="btn btn-secondary btn-sm" title="Attach quad face outward on selected edge">
+              <span>➕ Attach Face</span>
+            </button>
+            <button id="btn-auto-boundary" class="btn btn-secondary btn-sm" title="Auto-detect outer perimeter edges as Boundary (B)">
+              <span>🪄 Auto-Boundary</span>
+            </button>
+            <button id="btn-invert-folds" class="btn btn-secondary btn-sm" title="Invert Mountain & Valley folds (M ↔ V)">
+              <span>🔄 Invert Folds</span>
+            </button>
+          </div>
+
+          <div class="toolbar-divider"></div>
+
+          <!-- 4. Transforms & View -->
+          <div class="toolbar-section">
+            <button id="btn-flip-v" class="btn btn-secondary btn-sm" title="Flip 2D Net Vertically (Top ↕ Bottom)">
+              <span>⇅ Flip V</span>
+            </button>
+            <button id="btn-flip-h" class="btn btn-secondary btn-sm" title="Flip 2D Net Horizontally (Left ↔ Right)">
+              <span>⇄ Flip H</span>
+            </button>
+            <button id="btn-center-net" class="btn btn-secondary btn-sm" title="Center 2D Net view">
+              <span>🎯 Center</span>
+            </button>
+          </div>
+
+          <div class="toolbar-divider"></div>
+
+          <!-- 5. View Panels -->
           <div class="toolbar-section right">
             <button id="btn-toggle-preview" class="btn btn-secondary active" title="Toggle Pop-Out Live 3D Preview Sidebar">
               <span>👁️ 3D Preview</span>
             </button>
             <button id="btn-toggle-code" class="btn btn-secondary" title="Toggle Live FOLD JSON Code Panel">
-              <span>{ } JSON Code</span>
-            </button>
-            <button id="btn-export-fold" class="btn btn-secondary" title="Download FOLD 1.1 JSON file">
-              <span>💾 Export .json</span>
+              <span>{ } Code</span>
             </button>
           </div>
         </div>

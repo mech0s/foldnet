@@ -88,7 +88,8 @@ class App {
       const jsonModules = import.meta.glob('../models/*.json', { eager: true });
       const cadModules = import.meta.glob('../models/*.{stl,obj,step,stp}', { query: '?url', eager: true });
 
-      const discovered = [];
+      const jsonDiscovered = [];
+      const cadDiscovered = [];
 
       for (const path in jsonModules) {
         const filename = path.split('/').pop();
@@ -99,7 +100,7 @@ class App {
           const title = data.file_title || data.title || filename.replace('.json', '');
           const facesCount = Array.isArray(data.faces_vertices) ? data.faces_vertices.length : null;
 
-          discovered.push({
+          jsonDiscovered.push({
             url: `models/${filename}`,
             filename,
             title,
@@ -113,7 +114,7 @@ class App {
         const mod = cadModules[path];
         const cadUrl = mod.default || mod;
 
-        discovered.push({
+        cadDiscovered.push({
           url: cadUrl,
           filename,
           title: '3D CAD Model',
@@ -121,34 +122,50 @@ class App {
         });
       }
 
-      // Sort alphabetically by filename
-      discovered.sort((a, b) => a.filename.localeCompare(b.filename));
+      jsonDiscovered.sort((a, b) => a.filename.localeCompare(b.filename));
+      cadDiscovered.sort((a, b) => a.filename.localeCompare(b.filename));
 
-      // Rebuild model dropdown options
+      // Rebuild model dropdown options with optgroups
       modelSelect.innerHTML = '';
       let defaultSelectedUrl = 'models/subdivided-notched-cube.json';
 
-      discovered.forEach(m => {
-        const opt = document.createElement('option');
-        opt.value = m.url;
-        const faceBadge = m.facesCount ? ` (${m.facesCount} Faces)` : ' (CAD Model)';
-        
-        const nameWithoutExt = m.filename.replace(/\.[^/.]+$/, '');
-        const titleClean = m.title.toLowerCase().replace(/[^a-z0-9]+/g, '');
-        const nameClean = nameWithoutExt.toLowerCase().replace(/[^a-z0-9]+/g, '');
+      if (jsonDiscovered.length > 0) {
+        const jsonGroup = document.createElement('optgroup');
+        jsonGroup.label = 'Sample FOLD Nets';
+        jsonDiscovered.forEach(m => {
+          const opt = document.createElement('option');
+          opt.value = m.url;
+          const faceBadge = m.facesCount ? ` (${m.facesCount} Faces)` : '';
+          const nameWithoutExt = m.filename.replace(/\.[^/.]+$/, '');
+          const titleClean = m.title.toLowerCase().replace(/[^a-z0-9]+/g, '');
+          const nameClean = nameWithoutExt.toLowerCase().replace(/[^a-z0-9]+/g, '');
 
-        if (titleClean === nameClean || m.title === '3D CAD Model') {
-          opt.textContent = `${m.filename}${faceBadge}`;
-        } else {
-          opt.textContent = `${m.filename} — ${m.title}${faceBadge}`;
-        }
+          if (titleClean === nameClean) {
+            opt.textContent = `${m.filename}${faceBadge}`;
+          } else {
+            opt.textContent = `${m.filename} — ${m.title}${faceBadge}`;
+          }
 
-        if (m.filename === 'subdivided-notched-cube.json' || m.filename.includes('subdivided-notched')) {
-          opt.selected = true;
-          defaultSelectedUrl = m.url;
-        }
-        modelSelect.appendChild(opt);
-      });
+          if (m.filename === 'subdivided-notched-cube.json' || m.filename.includes('subdivided-notched')) {
+            opt.selected = true;
+            defaultSelectedUrl = m.url;
+          }
+          jsonGroup.appendChild(opt);
+        });
+        modelSelect.appendChild(jsonGroup);
+      }
+
+      if (cadDiscovered.length > 0) {
+        const cadGroup = document.createElement('optgroup');
+        cadGroup.label = 'Sample CAD Models';
+        cadDiscovered.forEach(m => {
+          const opt = document.createElement('option');
+          opt.value = m.url;
+          opt.textContent = m.filename;
+          cadGroup.appendChild(opt);
+        });
+        modelSelect.appendChild(cadGroup);
+      }
 
       const customOpt = document.createElement('option');
       customOpt.value = 'custom';
@@ -947,17 +964,14 @@ class App {
   }
 
   updateRegenButtonUI(isCad) {
-    const btnTop = document.getElementById('btn-regen-cad');
+    const cadSection = document.getElementById('editor-cad-section');
     const btnEditor = document.getElementById('btn-editor-regen-cad');
-    const labelTop = document.getElementById('btn-regen-label');
     const labelEditor = document.getElementById('btn-editor-regen-label');
 
-    const display = isCad ? 'inline-flex' : 'none';
-    if (btnTop) btnTop.style.display = display;
-    if (btnEditor) btnEditor.style.display = display;
-
-    if (labelTop) labelTop.textContent = `Re-gen Net (Seed #${this.currentCadSeed})`;
-    if (labelEditor) labelEditor.textContent = `🎲 Re-gen Net (Seed #${this.currentCadSeed})`;
+    const display = isCad ? 'flex' : 'none';
+    if (cadSection) cadSection.style.display = display;
+    if (btnEditor) btnEditor.style.display = isCad ? 'inline-flex' : 'none';
+    if (labelEditor) labelEditor.textContent = `🎲 Re-gen (Seed #${this.currentCadSeed})`;
   }
 
   toggleAnimation() {

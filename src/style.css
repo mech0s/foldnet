@@ -180,6 +180,18 @@ body {
   transform: translateY(-1px);
 }
 
+.export-btn-group {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.btn-sm {
+  padding: 0.35rem 0.65rem;
+  font-size: 0.78rem;
+  gap: 0.35rem;
+}
+
 .btn-group {
   display: flex;
   align-items: center;
