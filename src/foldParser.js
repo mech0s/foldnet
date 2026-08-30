@@ -91,6 +91,8 @@ export function parseFoldData(json) {
     edgesAssignment,
     edgesFoldAngle: parsedFoldAngles,
     edgeLookup,
+    _assembly: json._assembly || null,
+    _artworks: json._artworks || null,
     counts: {
       vertices: vertices.length,
       edges: edgesVertices.length,

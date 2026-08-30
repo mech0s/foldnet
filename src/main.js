@@ -854,16 +854,26 @@ class App {
       });
     }
 
-    // Export FOLD JSON File Action
+    // Export FOLD JSON File Action (Single or Multi-Part Assembly)
     document.getElementById('btn-export-fold').addEventListener('click', async () => {
-      if (!this.netEditor) return;
-      const foldJson = this.netEditor.getFoldJSON();
-      const str = JSON.stringify(foldJson, null, 2);
+      // Synchronize latest Net Editor changes for the active part if open
+      if (this.netEditor) {
+        try {
+          const netFold = this.netEditor.getFoldJSON();
+          this.assemblyManager.updateActivePartFoldJSON(netFold);
+        } catch (err) {
+          console.warn('Net Editor sync warning before export:', err);
+        }
+      }
 
-      let rawTitle = foldJson.file_title || (this.foldData && this.foldData.title ? this.foldData.title : 'box-net');
+      const payload = this.assemblyManager.getAssemblyJSON();
+      if (!payload) return;
+      const str = JSON.stringify(payload, null, 2);
+
+      let rawTitle = payload.file_title || (this.foldData && this.foldData.title ? this.foldData.title : (this.assemblyManager.isAssembly ? 'assembly-model' : 'box-net'));
       let slug = rawTitle.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
       if (!slug || slug === 'untitled') {
-        slug = 'box-net-prepared';
+        slug = this.assemblyManager.isAssembly ? 'assembly-model-prepared' : 'box-net-prepared';
       }
 
       const fileName = `${slug}.json`;
@@ -874,7 +884,7 @@ class App {
           const handle = await window.showSaveFilePicker({
             suggestedName: fileName,
             types: [{
-              description: 'FOLD 1.1 Spec File (*.json, *.fold)',
+              description: 'FOLD 1.1 Model File (*.json, *.fold)',
               accept: { 'application/json': ['.json', '.fold'] }
             }]
           });

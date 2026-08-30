@@ -296,6 +296,25 @@ export class GraphicStudio {
   loadAssembly(assemblyManager, onSelectPart = null) {
     this.assemblyManager = assemblyManager;
     this.onSelectAssemblyPart = onSelectPart;
+    this.undoStack = [];
+    this.redoStack = [];
+    this.selectedArtwork = null;
+
+    // Reset artwork cache for the newly loaded assembly or single model
+    this.partArtworksMap.clear();
+
+    // Hydrate partArtworksMap from assemblyManager parts if present
+    if (assemblyManager && Array.isArray(assemblyManager.parts)) {
+      assemblyManager.parts.forEach((p, idx) => {
+        if (p.faceArtworks && p.faceArtworks.size > 0) {
+          this.partArtworksMap.set(idx, p.faceArtworks);
+        } else {
+          const cleanMap = new Map();
+          this.partArtworksMap.set(idx, cleanMap);
+          p.faceArtworks = cleanMap;
+        }
+      });
+    }
 
     if (assemblyManager && assemblyManager.isAssembly) {
       if (this.thumbnailStrip) {
@@ -313,6 +332,14 @@ export class GraphicStudio {
         const activePart = assemblyManager.getActivePart();
         if (activePart) this.loadModel(activePart.foldData, activePart.kinematics, null, 0);
       }
+    }
+
+    // Notify 3D renderers of current face artworks (clean or restored) across all parts
+    if (this.onTextureUpdate && assemblyManager && Array.isArray(assemblyManager.parts)) {
+      assemblyManager.parts.forEach((p, pIdx) => {
+        const artMap = this.partArtworksMap.get(pIdx) || new Map();
+        this.onTextureUpdate(artMap, pIdx);
+      });
     }
   }
 
@@ -640,7 +667,9 @@ export class GraphicStudio {
     this.currentPartIndex = partIndex;
 
     // Load or create artwork storage for this specific part
-    if (!this.partArtworksMap.has(partIndex)) {
+    if (this.assemblyManager && this.assemblyManager.parts[partIndex] && this.assemblyManager.parts[partIndex].faceArtworks && this.assemblyManager.parts[partIndex].faceArtworks.size > 0) {
+      this.partArtworksMap.set(partIndex, this.assemblyManager.parts[partIndex].faceArtworks);
+    } else if (!this.partArtworksMap.has(partIndex)) {
       this.partArtworksMap.set(partIndex, new Map());
     }
     this.faceArtworks = this.partArtworksMap.get(partIndex);
@@ -1088,38 +1117,6 @@ export class GraphicStudio {
       line.setAttribute('class', e.isFoldHinge ? 'cluster-crease fold' : 'cluster-crease cut-seam');
       this.rootGroup.appendChild(line);
     });
-
-    // 4. Render Active Selection Box (Vector-effect non-scaling, zoom-independent)
-    if (this.selectedArtwork) {
-      const selSpec = this.selectedArtwork;
-      const selBBox = this.getArtworkBBox(selSpec);
-      if (selBBox && isFinite(selBBox.minX) && isFinite(selBBox.maxX)) {
-        const selGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-        selGroup.setAttribute('id', 'studio-selection-box');
-        selGroup.style.pointerEvents = 'none';
-
-        const pad = Math.max(0.0001, 3 / (this.zoom || 1)); // 3px margin in screen space
-        const bx = selBBox.minX - pad;
-        const by = selBBox.minY - pad;
-        const bw = Math.max(0.0001, (selBBox.maxX - selBBox.minX) + pad * 2);
-        const bh = Math.max(0.0001, (selBBox.maxY - selBBox.minY) + pad * 2);
-
-        // Dashed bounding box
-        const boxRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-        boxRect.setAttribute('x', bx);
-        boxRect.setAttribute('y', by);
-        boxRect.setAttribute('width', bw);
-        boxRect.setAttribute('height', bh);
-        boxRect.setAttribute('fill', 'none');
-        boxRect.setAttribute('stroke', '#818cf8');
-        boxRect.setAttribute('stroke-width', '1.5');
-        boxRect.setAttribute('stroke-dasharray', '4 3');
-        boxRect.setAttribute('vector-effect', 'non-scaling-stroke');
-        selGroup.appendChild(boxRect);
-
-        this.rootGroup.appendChild(selGroup);
-      }
-    }
   }
 
   /**
@@ -1129,6 +1126,7 @@ export class GraphicStudio {
   createSVGElementFromSpec(spec, targetFace = null) {
     let elem = null;
     const unitScale = this.modelUnitScale || 1;
+    const isSelected = !!(this.selectedArtwork && spec.id === this.selectedArtwork.id);
 
     if (spec.type === 'rect') {
       const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
@@ -1175,6 +1173,24 @@ export class GraphicStudio {
         text.textContent = spec.text;
         g.appendChild(text);
       }
+
+      // Render selection boundary inset on the perimeter of the graphic element
+      if (isSelected) {
+        const selInset = Math.max(0.0001, 1.0 / (this.zoom || 1));
+        const selRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        selRect.setAttribute('x', spec.x + selInset);
+        selRect.setAttribute('y', spec.y + selInset);
+        selRect.setAttribute('width', Math.max(0.0001, spec.width - selInset * 2));
+        selRect.setAttribute('height', Math.max(0.0001, spec.height - selInset * 2));
+        selRect.setAttribute('fill', 'none');
+        selRect.setAttribute('stroke', '#818cf8');
+        selRect.setAttribute('stroke-width', '2');
+        selRect.setAttribute('stroke-dasharray', '5 3');
+        selRect.setAttribute('vector-effect', 'non-scaling-stroke');
+        selRect.setAttribute('pointer-events', 'none');
+        g.appendChild(selRect);
+      }
+
       elem = g;
     } else if (spec.type === 'circle') {
       const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
@@ -1221,31 +1237,99 @@ export class GraphicStudio {
         text.textContent = spec.text;
         g.appendChild(text);
       }
+
+      // Render selection boundary inset on circle perimeter
+      if (isSelected) {
+        const selInset = Math.max(0.0001, 1.0 / (this.zoom || 1));
+        const selCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        selCircle.setAttribute('cx', spec.cx);
+        selCircle.setAttribute('cy', spec.cy);
+        selCircle.setAttribute('r', Math.max(0.0001, spec.r - selInset));
+        selCircle.setAttribute('fill', 'none');
+        selCircle.setAttribute('stroke', '#818cf8');
+        selCircle.setAttribute('stroke-width', '2');
+        selCircle.setAttribute('stroke-dasharray', '5 3');
+        selCircle.setAttribute('vector-effect', 'non-scaling-stroke');
+        selCircle.setAttribute('pointer-events', 'none');
+        g.appendChild(selCircle);
+      }
+
       elem = g;
     } else if (spec.type === 'text') {
-      elem = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-      elem.setAttribute('x', spec.x);
-      elem.setAttribute('y', -spec.y);
-      elem.setAttribute('transform', `scale(1, -1)`);
-      elem.setAttribute('dominant-baseline', 'hanging');
-      elem.setAttribute('text-anchor', spec.textAlign === 'center' ? 'middle' : (spec.textAlign === 'right' ? 'end' : 'start'));
+      const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      g.setAttribute('class', 'artwork-element');
+
+      const textElem = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      textElem.setAttribute('x', spec.x);
+      textElem.setAttribute('y', -spec.y);
+      textElem.setAttribute('transform', `scale(1, -1)`);
+      textElem.setAttribute('dominant-baseline', 'hanging');
+      textElem.setAttribute('text-anchor', spec.textAlign === 'center' ? 'middle' : (spec.textAlign === 'right' ? 'end' : 'start'));
       const fSize = spec.fontSize || (this.standaloneFontSize || 10);
-      elem.setAttribute('font-size', `${fSize}px`);
-      elem.setAttribute('font-weight', 'bold');
-      elem.setAttribute('font-family', 'sans-serif');
-      elem.setAttribute('fill', spec.fontColor || spec.fill || '#ffffff');
-      elem.setAttribute('stroke', 'none');
-      elem.setAttribute('class', 'artwork-element');
-      elem.textContent = spec.text;
+      textElem.setAttribute('font-size', `${fSize}px`);
+      textElem.setAttribute('font-weight', 'bold');
+      textElem.setAttribute('font-family', 'sans-serif');
+      textElem.setAttribute('fill', spec.fontColor || spec.fill || '#ffffff');
+      textElem.setAttribute('stroke', 'none');
+      textElem.textContent = spec.text;
+      g.appendChild(textElem);
+
+      if (isSelected) {
+        const textLen = (spec.text || '').length;
+        const estW = Math.max(fSize, textLen * fSize * 0.6);
+        const estH = fSize * 1.2;
+        let bx = spec.x;
+        if (spec.textAlign === 'center') bx -= estW / 2;
+        else if (spec.textAlign === 'right') bx -= estW;
+        const by = spec.y - estH * 0.9;
+
+        const selRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        selRect.setAttribute('x', bx);
+        selRect.setAttribute('y', by);
+        selRect.setAttribute('width', estW);
+        selRect.setAttribute('height', estH);
+        selRect.setAttribute('fill', 'none');
+        selRect.setAttribute('stroke', '#818cf8');
+        selRect.setAttribute('stroke-width', '2');
+        selRect.setAttribute('stroke-dasharray', '5 3');
+        selRect.setAttribute('vector-effect', 'non-scaling-stroke');
+        selRect.setAttribute('pointer-events', 'none');
+        g.appendChild(selRect);
+      }
+
+      elem = g;
     } else if (spec.type === 'stamp') {
       elem = this.createStampElement(spec);
+      if (isSelected) {
+        let sw = 60, sh = 40;
+        if (spec.stampType === 'up') { sw = 40; sh = 50; }
+        else if (spec.stampType === 'recycle') { sw = 50; sh = 50; }
+        else if (spec.stampType === 'barcode') { sw = 70; sh = 40; }
+        const selRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        selRect.setAttribute('x', 0);
+        selRect.setAttribute('y', 0);
+        selRect.setAttribute('width', sw);
+        selRect.setAttribute('height', sh);
+        selRect.setAttribute('fill', 'none');
+        selRect.setAttribute('stroke', '#818cf8');
+        selRect.setAttribute('stroke-width', '2');
+        selRect.setAttribute('stroke-dasharray', '5 3');
+        selRect.setAttribute('vector-effect', 'non-scaling-stroke');
+        selRect.setAttribute('pointer-events', 'none');
+        elem.appendChild(selRect);
+      }
     }
 
     if (elem) {
       elem.style.cursor = 'pointer';
+      elem.addEventListener('pointerdown', (e) => {
+        if (e.button === 0) {
+          e.stopPropagation();
+          this.selectActiveArtwork(spec);
+        }
+      });
       elem.addEventListener('click', (e) => {
         e.stopPropagation();
-        this.selectActiveArtwork(spec);
       });
     }
     return elem;
@@ -1310,7 +1394,8 @@ export class GraphicStudio {
       return;
     }
 
-    if (this.selectedArtwork) {
+    // Only deselect if clicking on empty canvas space (not directly on an artwork element)
+    if (this.selectedArtwork && !e.target.closest('.artwork-element')) {
       this.deselectActiveArtwork();
     }
 

@@ -206,7 +206,9 @@ export class NetEditor {
       faces_vertices: faces,
       edges_vertices: edges,
       edges_assignment: assignments,
-      edges_foldAngle: angles
+      edges_foldAngle: angles,
+      ...(json._assembly ? { _assembly: json._assembly } : {}),
+      ...(json._artworks ? { _artworks: json._artworks } : {})
     };
 
     this.selectedEdgeIndex = -1;

@@ -70,6 +70,13 @@ export class AssemblyManager {
 
         const alignTransform = this.computePartAlignmentTransform(foldJson, parsedFold);
 
+        let faceArtworks = new Map();
+        if (foldJson._artworks) {
+          for (const [fIdxStr, list] of Object.entries(foldJson._artworks)) {
+            faceArtworks.set(parseInt(fIdxStr, 10), list);
+          }
+        }
+
         this.parts.push({
           id: p.id || `part_${idx}`,
           name: p.name || foldJson.file_title || `Component ${idx + 1}`,
@@ -79,6 +86,7 @@ export class AssemblyManager {
           bbox,
           center,
           isVisible: true,
+          faceArtworks,
           alignMatrix: alignTransform.matrix,
           alignTranslation: alignTransform.translation,
           alignQuaternion: alignTransform.quaternion,
@@ -98,6 +106,13 @@ export class AssemblyManager {
       ];
       const alignTransform = this.computePartAlignmentTransform(payload, parsedFold);
 
+      let faceArtworks = new Map();
+      if (payload._artworks) {
+        for (const [fIdxStr, list] of Object.entries(payload._artworks)) {
+          faceArtworks.set(parseInt(fIdxStr, 10), list);
+        }
+      }
+
       this.parts.push({
         id: 'part_0',
         name: payload.file_title || 'Main Body',
@@ -107,6 +122,7 @@ export class AssemblyManager {
         bbox,
         center,
         isVisible: true,
+        faceArtworks,
         alignMatrix: alignTransform.matrix,
         alignTranslation: alignTransform.translation,
         alignQuaternion: alignTransform.quaternion,
@@ -283,10 +299,86 @@ export class AssemblyManager {
     const active = this.getActivePart();
     if (!active) return;
 
+    // Preserve _assembly metadata if not explicitly provided
+    if (active.foldJson && active.foldJson._assembly && !foldJson._assembly) {
+      foldJson._assembly = active.foldJson._assembly;
+    }
+    if (active.foldData && active.foldData._assembly && !foldJson._assembly) {
+      foldJson._assembly = active.foldData._assembly;
+    }
+
     active.foldJson = foldJson;
     active.foldData = parseFoldData(foldJson);
     active.kinematics = new FoldKinematics(active.foldData);
 
+    // Recompute alignment transforms so 3D position is strictly preserved
+    const alignTransform = this.computePartAlignmentTransform(foldJson, active.foldData);
+    active.alignMatrix = alignTransform.matrix;
+    active.alignTranslation = alignTransform.translation;
+    active.alignQuaternion = alignTransform.quaternion;
+
     this.emit('assemblyUpdated', this);
+  }
+
+  /**
+   * Serializes the complete assembly or single model into a FOLD 1.1 compliant JSON payload.
+   * Preserves 2D net topology, crease assignments, fold angles, 3D spatial alignment metadata,
+   * and face vector artworks.
+   */
+  getAssemblyJSON() {
+    if (!this.isAssembly && this.parts.length <= 1) {
+      const part = this.parts[0];
+      if (!part) return null;
+      const foldJson = { ...(part.foldJson || part.foldData) };
+
+      if (!foldJson._assembly) {
+        if (part.foldData && part.foldData._assembly) foldJson._assembly = part.foldData._assembly;
+        else if (part.foldJson && part.foldJson._assembly) foldJson._assembly = part.foldJson._assembly;
+      }
+
+      if (part.faceArtworks && part.faceArtworks.size > 0) {
+        foldJson._artworks = {};
+        part.faceArtworks.forEach((artList, fIdx) => {
+          if (artList && artList.length > 0) {
+            foldJson._artworks[fIdx] = artList;
+          }
+        });
+      }
+      return foldJson;
+    }
+
+    const partsExport = this.parts.map((p, idx) => {
+      const pFold = { ...(p.foldJson || p.foldData) };
+
+      if (!pFold._assembly) {
+        if (p.foldData && p.foldData._assembly) pFold._assembly = p.foldData._assembly;
+        else if (p.foldJson && p.foldJson._assembly) pFold._assembly = p.foldJson._assembly;
+      }
+
+      if (p.faceArtworks && p.faceArtworks.size > 0) {
+        pFold._artworks = {};
+        p.faceArtworks.forEach((artList, fIdx) => {
+          if (artList && artList.length > 0) {
+            pFold._artworks[fIdx] = artList;
+          }
+        });
+      }
+      return {
+        id: p.id || `part_${idx}`,
+        name: p.name || `Component ${idx + 1}`,
+        bbox: p.bbox,
+        center: p.center,
+        foldData: pFold
+      };
+    });
+
+    return {
+      file_spec: 1.1,
+      file_creator: 'FoldNet Assembly',
+      file_title: this.title || 'Multi-Part Assembly',
+      file_classes: ['multiModel'],
+      isAssembly: true,
+      parts: partsExport
+    };
   }
 }
