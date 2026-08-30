@@ -314,6 +314,8 @@ export class FoldRenderer {
         faceVerts,
         geometryFront,
         geometryBack,
+        faceIndex: fIdx,
+        partIndex: 0,
         faceBounds: { minX, maxX, minY, maxY, width, height }
       });
     });
@@ -479,8 +481,8 @@ export class FoldRenderer {
     if (!this.faceMeshes || this.faceMeshes.length === 0) return;
 
     this.faceMeshes.forEach((meshItem) => {
-      const partIdx = meshItem.partIndex !== undefined ? meshItem.partIndex : 0;
-      const fIdx = meshItem.faceIndex !== undefined ? meshItem.faceIndex : 0;
+      const partIdx = meshItem.partIndex !== undefined ? meshItem.partIndex : (meshItem.frontMesh?.userData?.partIndex ?? 0);
+      const fIdx = meshItem.faceIndex !== undefined ? meshItem.faceIndex : (meshItem.frontMesh?.userData?.faceIndex ?? 0);
 
       // Resolve artworks for this mesh item
       let artworks = [];
@@ -529,8 +531,9 @@ export class FoldRenderer {
       canvas.height = canvasH;
       const ctx = canvas.getContext('2d');
 
-      // Base background color
-      const bgHex = '#' + this.currentTheme.frontColor.toString(16).padStart(6, '0');
+      // Base background color (supports custom face-fill from Graphic Studio)
+      const faceFillArt = artworks.find(item => item.type === 'face-fill');
+      const bgHex = faceFillArt ? faceFillArt.fill : ('#' + this.currentTheme.frontColor.toString(16).padStart(6, '0'));
       ctx.fillStyle = bgHex;
       ctx.fillRect(0, 0, canvasW, canvasH);
 
@@ -553,6 +556,7 @@ export class FoldRenderer {
 
       // Render artwork items onto canvas
       artworks.forEach(item => {
+        if (item.type === 'face-fill') return; // Handled as base background fill
         ctx.save();
 
         // Apply composite cluster→net→canvas transform via ctx.setTransform
@@ -603,9 +607,9 @@ export class FoldRenderer {
       }
       if (item.text && item.text.trim().length > 0) {
         const padding = Math.min(item.width, item.height) * 0.08;
-        const maxW = Math.max(1, item.width - padding * 2);
-        const maxH = Math.max(1, item.height - padding * 2);
-        const fitSize = Math.max(2, Math.min(maxH * 0.85, maxW / Math.max(1, item.text.length * 0.55)));
+        const maxW = Math.max(0.0001, item.width - padding * 2);
+        const maxH = Math.max(0.0001, item.height - padding * 2);
+        const fitSize = Math.max(0.0001, Math.min(maxH * 0.85, maxW / Math.max(1, item.text.length * 0.55)));
 
         const align = item.textAlign || 'center';
         let textX = item.x + item.width / 2;
@@ -634,9 +638,9 @@ export class FoldRenderer {
       if (item.text && item.text.trim().length > 0) {
         const side = 1.414 * item.r;
         const padding = side * 0.08;
-        const maxW = Math.max(1, side - padding * 2);
-        const maxH = Math.max(1, side - padding * 2);
-        const fitSize = Math.max(2, Math.min(maxH * 0.85, maxW / Math.max(1, item.text.length * 0.55)));
+        const maxW = Math.max(0.0001, side - padding * 2);
+        const maxH = Math.max(0.0001, side - padding * 2);
+        const fitSize = Math.max(0.0001, Math.min(maxH * 0.85, maxW / Math.max(1, item.text.length * 0.55)));
 
         const align = item.textAlign || 'center';
         let textX = item.cx;
@@ -660,7 +664,7 @@ export class FoldRenderer {
       // Invert Y scale so text renders upright under the negative Y canvas transform
       ctx.scale(1, -1);
       ctx.fillStyle = item.fontColor || item.fill || '#ffffff';
-      const fSize = (item.fontSize || 24) * unitScale;
+      const fSize = item.fontSize || (24 * unitScale);
       ctx.font = `bold ${fSize}px sans-serif`;
       ctx.textAlign = item.textAlign || 'left';
       ctx.textBaseline = 'top';

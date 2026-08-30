@@ -123,6 +123,21 @@ export class GraphicStudio {
             <div class="tool-section">
               <span class="tool-section-title">Draw Tools</span>
               <div class="tool-btn-group">
+                <button class="tool-btn" data-tool="select" title="Select / Move / Focus Face (V)">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M3 3l7 18 3-7 7-3L3 3z"></path>
+                    <path d="M13 13l6 6"></path>
+                  </svg>
+                  <span>Select</span>
+                </button>
+                <button class="tool-btn" data-tool="fill" title="Face Fill / Paint Bucket (F)">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M19 11L12 17l-7-7 7-7 4 4"></path>
+                    <path d="M5 10l-2 2 7 7 2-2"></path>
+                    <path d="M22 20a2 2 0 1 1-4 0c0-1.6 2-3 2-3s2 1.4 2 3z" fill="currentColor"></path>
+                  </svg>
+                  <span>Face Fill</span>
+                </button>
                 <button class="tool-btn active" data-tool="rect" title="Rectangle (R)">
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
@@ -323,19 +338,39 @@ export class GraphicStudio {
         this.container.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         this.activeTool = btn.getAttribute('data-tool');
+        if (this.svgElement) {
+          this.svgElement.setAttribute('data-tool', this.activeTool);
+        }
+        this.deselectActiveArtwork();
 
         // Toggle tool-specific options
         this.container.querySelector('.stamp-options').style.display = this.activeTool === 'stamp' ? 'block' : 'none';
       });
     });
 
+    if (this.svgElement) {
+      this.svgElement.setAttribute('data-tool', this.activeTool);
+    }
+
     // Color Palette Swatches Rendering & Click Handlers
     const paletteGrid = this.container.querySelector('#studio-color-palette');
     const STUDIO_COLORS = [
-      '#ffffff', '#cbd5e1', '#64748b', '#1e293b', '#0f172a', '#000000',
-      '#ef4444', '#f97316', '#f59e0b', '#eab308', '#84cc16', '#10b981',
-      '#06b6d4', '#0ea5e9', '#3b82f6', '#6366f1', '#8b5cf6', '#d946ef',
-      '#f43f5e', '#854d0e', '#b45309', '#78350f', '#d97706', '#fbbf24'
+      // Row 1: Primary Grayscale Continuum
+      '#ffffff', '#f8fafc', '#e2e8f0', '#cbd5e1', '#94a3b8', '#64748b', '#475569', '#334155',
+      // Row 2: Deep Grayscale & Earth / Cardboard / Wood
+      '#1e293b', '#0f172a', '#090d16', '#000000', '#fef3c7', '#fde68a', '#fcd34d', '#451a03',
+      // Row 3: Browns, Ochres & Industrial Ambers
+      '#fbbf24', '#f59e0b', '#d97706', '#b45309', '#92400e', '#78350f', '#854d0e', '#592909',
+      // Row 4: Reds & Pinks
+      '#fee2e2', '#fca5a5', '#f87171', '#ef4444', '#dc2626', '#b91c1c', '#991b1b', '#7f1d1d',
+      // Row 5: Roses, Magentas & Purples
+      '#f43f5e', '#e11d48', '#be123c', '#ec4899', '#db2777', '#d946ef', '#c026d3', '#86198f',
+      // Row 6: Violets, Indigos & Deep Navy
+      '#f3e8ff', '#c084fc', '#a855f7', '#9333ea', '#7e22ce', '#6366f1', '#4f46e5', '#3730a3',
+      // Row 7: Sky Blues, Cyans & Deep Ocean Blues
+      '#e0f2fe', '#7dd3fc', '#38bdf8', '#0ea5e9', '#0284c7', '#3b82f6', '#2563eb', '#1e3a8a',
+      // Row 8: Teals, Limes & Vibrant Eco Greens
+      '#ccfbf1', '#14b8a6', '#0f766e', '#10b981', '#059669', '#22c55e', '#16a34a', '#84cc16'
     ];
 
     if (paletteGrid) {
@@ -483,9 +518,17 @@ export class GraphicStudio {
     // Keyboard shortcuts
     window.addEventListener('keydown', (e) => {
       if (this.container.closest('.active') || this.container.offsetParent !== null) {
+        const activeInput = document.activeElement;
+        const isEditingText = activeInput && (activeInput.tagName === 'INPUT' || activeInput.tagName === 'TEXTAREA');
+
         if (e.key === 'z' && (e.ctrlKey || e.metaKey)) {
           e.preventDefault();
           this.undo();
+        } else if (e.key === 'Escape') {
+          this.deselectActiveArtwork();
+        } else if ((e.key === 'Delete' || e.key === 'Backspace') && !isEditingText && this.selectedArtwork) {
+          e.preventDefault();
+          this.deleteSelectedArtwork();
         }
       }
     });
@@ -573,6 +616,20 @@ export class GraphicStudio {
       this.container.querySelectorAll('.align-btn').forEach(btn => {
         btn.classList.toggle('active', btn.getAttribute('data-align') === spec.textAlign);
       });
+    }
+
+    this.renderClusterSVG();
+  }
+
+  deselectActiveArtwork() {
+    if (this.selectedArtwork) {
+      this.selectedArtwork = null;
+      const textInp = this.container.querySelector('#studio-text-input');
+      if (textInp) {
+        textInp.value = '';
+      }
+      this.textValue = '';
+      this.renderClusterSVG();
     }
   }
 
@@ -885,6 +942,7 @@ export class GraphicStudio {
   }
 
   setFocusFace(faceIdx, cameraUp = null) {
+    this.deselectActiveArtwork();
     if (cameraUp) this.lastCameraUp = cameraUp;
     if (faceIdx >= 0 && faceIdx < this.foldData.facesVertices.length) {
       this.focusFaceIndex = faceIdx;
@@ -941,7 +999,7 @@ export class GraphicStudio {
     });
     this.rootGroup.appendChild(defs);
 
-    // 1. Render Face Outlines
+    // 1. Render Face Outlines & Background Fills
     cluster.clusterFaces.forEach(f => {
       const ptsStr = f.polygon.map(p => `${p[0]},${p[1]}`).join(' ');
       const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
@@ -952,14 +1010,26 @@ export class GraphicStudio {
 
       poly.setAttribute('class', faceClass);
       poly.setAttribute('data-face', f.faceIndex);
+
+      // Check if custom face-fill exists
+      const artList = this.faceArtworks.get(f.faceIndex) || [];
+      const fillArt = artList.find(a => a.type === 'face-fill');
+      if (fillArt && fillArt.fill) {
+        poly.style.fill = fillArt.fill;
+      }
       
-      // Click neighbor face to focus it
-      if (!f.isFocus) {
-        poly.addEventListener('click', (e) => {
+      // Click face
+      poly.addEventListener('click', (e) => {
+        if (this.activeTool === 'fill') {
+          e.stopPropagation();
+          this.applyFaceFill(f);
+          return;
+        }
+        if (!f.isFocus) {
           e.stopPropagation();
           this.setFocusFace(f.faceIndex);
-        });
-      }
+        }
+      });
 
       this.rootGroup.appendChild(poly);
 
@@ -1018,6 +1088,38 @@ export class GraphicStudio {
       line.setAttribute('class', e.isFoldHinge ? 'cluster-crease fold' : 'cluster-crease cut-seam');
       this.rootGroup.appendChild(line);
     });
+
+    // 4. Render Active Selection Box (Vector-effect non-scaling, zoom-independent)
+    if (this.selectedArtwork) {
+      const selSpec = this.selectedArtwork;
+      const selBBox = this.getArtworkBBox(selSpec);
+      if (selBBox && isFinite(selBBox.minX) && isFinite(selBBox.maxX)) {
+        const selGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        selGroup.setAttribute('id', 'studio-selection-box');
+        selGroup.style.pointerEvents = 'none';
+
+        const pad = Math.max(0.0001, 3 / (this.zoom || 1)); // 3px margin in screen space
+        const bx = selBBox.minX - pad;
+        const by = selBBox.minY - pad;
+        const bw = Math.max(0.0001, (selBBox.maxX - selBBox.minX) + pad * 2);
+        const bh = Math.max(0.0001, (selBBox.maxY - selBBox.minY) + pad * 2);
+
+        // Dashed bounding box
+        const boxRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        boxRect.setAttribute('x', bx);
+        boxRect.setAttribute('y', by);
+        boxRect.setAttribute('width', bw);
+        boxRect.setAttribute('height', bh);
+        boxRect.setAttribute('fill', 'none');
+        boxRect.setAttribute('stroke', '#818cf8');
+        boxRect.setAttribute('stroke-width', '1.5');
+        boxRect.setAttribute('stroke-dasharray', '4 3');
+        boxRect.setAttribute('vector-effect', 'non-scaling-stroke');
+        selGroup.appendChild(boxRect);
+
+        this.rootGroup.appendChild(selGroup);
+      }
+    }
   }
 
   /**
@@ -1043,9 +1145,9 @@ export class GraphicStudio {
 
       if (spec.text && spec.text.trim().length > 0) {
         const padding = Math.min(spec.width, spec.height) * 0.08;
-        const maxW = Math.max(1, spec.width - padding * 2);
-        const maxH = Math.max(1, spec.height - padding * 2);
-        const fontSize = Math.max(2, Math.min(maxH * 0.85, maxW / Math.max(1, spec.text.length * 0.55)));
+        const maxW = Math.max(0.0001, spec.width - padding * 2);
+        const maxH = Math.max(0.0001, spec.height - padding * 2);
+        const fontSize = Math.max(0.0001, Math.min(maxH * 0.85, maxW / Math.max(1, spec.text.length * 0.55)));
 
         const align = spec.textAlign || 'center';
         let textX = spec.x + spec.width / 2;
@@ -1089,9 +1191,9 @@ export class GraphicStudio {
       if (spec.text && spec.text.trim().length > 0) {
         const side = 1.414 * spec.r;
         const padding = side * 0.08;
-        const maxW = Math.max(1, side - padding * 2);
-        const maxH = Math.max(1, side - padding * 2);
-        const fontSize = Math.max(2, Math.min(maxH * 0.85, maxW / Math.max(1, spec.text.length * 0.55)));
+        const maxW = Math.max(0.0001, side - padding * 2);
+        const maxH = Math.max(0.0001, side - padding * 2);
+        const fontSize = Math.max(0.0001, Math.min(maxH * 0.85, maxW / Math.max(1, spec.text.length * 0.55)));
 
         const align = spec.textAlign || 'center';
         let textX = spec.cx;
@@ -1127,7 +1229,8 @@ export class GraphicStudio {
       elem.setAttribute('transform', `scale(1, -1)`);
       elem.setAttribute('dominant-baseline', 'hanging');
       elem.setAttribute('text-anchor', spec.textAlign === 'center' ? 'middle' : (spec.textAlign === 'right' ? 'end' : 'start'));
-      elem.setAttribute('font-size', (spec.fontSize || 24) * unitScale);
+      const fSize = spec.fontSize || (this.standaloneFontSize || 10);
+      elem.setAttribute('font-size', `${fSize}px`);
       elem.setAttribute('font-weight', 'bold');
       elem.setAttribute('font-family', 'sans-serif');
       elem.setAttribute('fill', spec.fontColor || spec.fill || '#ffffff');
@@ -1207,12 +1310,34 @@ export class GraphicStudio {
       return;
     }
 
+    if (this.selectedArtwork) {
+      this.deselectActiveArtwork();
+    }
+
     const rawPos = this.getCanvasCoords(e);
     const snap = this.getSnappedCoords(rawPos, e.ctrlKey);
     const pos = { x: snap.x, y: snap.y };
     const unitScale = this.modelUnitScale || 1;
     this.isDrawing = true;
     this.drawStart = pos;
+
+    if (this.activeTool === 'select') {
+      this.isDrawing = false;
+      return;
+    }
+
+    if (this.activeTool === 'fill') {
+      this.isDrawing = false;
+      if (this.currentCluster && this.currentCluster.clusterFaces) {
+        for (const face of this.currentCluster.clusterFaces) {
+          if (CrossSeamMapper.isPointInsidePoly([rawPos.x, rawPos.y], face.polygon)) {
+            this.applyFaceFill(face);
+            return;
+          }
+        }
+      }
+      return;
+    }
 
     if (this.activeTool === 'stamp') {
       const spec = {
@@ -1385,9 +1510,10 @@ export class GraphicStudio {
       return { minX: spec.cx - spec.r, minY: spec.cy - spec.r, maxX: spec.cx + spec.r, maxY: spec.cy + spec.r };
     }
     if (spec.type === 'text') {
-      const estW = (spec.text || '').length * (spec.fontSize || 24) * 0.6 * unitScale;
-      const h = (spec.fontSize || 24) * unitScale;
-      return { minX: spec.x - 5 * unitScale, minY: spec.y - h, maxX: spec.x + estW, maxY: spec.y + 5 * unitScale };
+      const fSize = spec.fontSize || (this.standaloneFontSize || 10);
+      const estW = (spec.text || '').length * fSize * 0.6;
+      const h = fSize;
+      return { minX: spec.x, minY: spec.y - h, maxX: spec.x + estW, maxY: spec.y };
     }
     if (spec.type === 'stamp') {
       const sizes = { fragile: [60, 40], up: [40, 50], recycle: [50, 50], barcode: [70, 40], star: [50, 50] };
@@ -1413,7 +1539,7 @@ export class GraphicStudio {
 
   /** Check if two bounding boxes overlap. */
   bboxOverlap(a, b) {
-    return a.minX < b.maxX && a.maxX > b.minX && a.minY < b.maxY && a.maxY > b.minY;
+    return a.minX <= b.maxX && a.maxX >= b.minX && a.minY <= b.maxY && a.maxY >= b.minY;
   }
 
   /**
@@ -1453,6 +1579,23 @@ export class GraphicStudio {
       }
     }
 
+    // Fallback: if boundary edge-case prevented bbox overlap, ensure focus face always receives artwork
+    if (addedPairs.length === 0) {
+      const f0 = this.currentCluster.clusterFaces.find(f => f.isFocus) || this.currentCluster.clusterFaces[0];
+      if (f0) {
+        const copy = {
+          ...spec,
+          faceIndex: f0.faceIndex,
+          clusterToNet: f0.clusterToNet
+        };
+        if (!this.faceArtworks.has(f0.faceIndex)) {
+          this.faceArtworks.set(f0.faceIndex, []);
+        }
+        this.faceArtworks.get(f0.faceIndex).push(copy);
+        addedPairs.push({ faceIndex: f0.faceIndex, spec: copy });
+      }
+    }
+
     if (addedPairs.length > 0) {
       this.undoStack.push({ action: 'add_multi', pairs: addedPairs });
       this.redoStack = [];
@@ -1462,11 +1605,67 @@ export class GraphicStudio {
     this.notifyTextureUpdate();
   }
 
+  applyFaceFill(face) {
+    const fIdx = face.faceIndex;
+    const spec = {
+      id: 'fill_' + Date.now() + '_' + Math.floor(Math.random() * 10000),
+      type: 'face-fill',
+      fill: this.fillColor || '#3b82f6',
+      faceIndex: fIdx,
+      clusterToNet: face.clusterToNet
+    };
+
+    if (!this.faceArtworks.has(fIdx)) {
+      this.faceArtworks.set(fIdx, []);
+    }
+    const list = this.faceArtworks.get(fIdx);
+    const oldIdx = list.findIndex(item => item.type === 'face-fill');
+    let prevFill = null;
+    if (oldIdx >= 0) {
+      prevFill = list[oldIdx];
+      list.splice(oldIdx, 1);
+    }
+    list.unshift(spec); // Place at base of artwork stack for this face
+
+    this.undoStack.push({ action: 'face_fill', faceIndex: fIdx, spec, prevFill });
+    this.redoStack = [];
+    this.renderClusterSVG();
+    this.notifyTextureUpdate();
+  }
+
+  deleteSelectedArtwork() {
+    if (!this.selectedArtwork) return;
+    const artId = this.selectedArtwork.id;
+    const deletedPairs = [];
+    this.faceArtworks.forEach((list, fIdx) => {
+      const idx = list.findIndex(item => item.id === artId);
+      if (idx >= 0) {
+        const item = list.splice(idx, 1)[0];
+        deletedPairs.push({ faceIndex: fIdx, spec: item });
+      }
+    });
+    if (deletedPairs.length > 0) {
+      this.undoStack.push({ action: 'delete_multi', pairs: deletedPairs });
+      this.redoStack = [];
+    }
+    this.deselectActiveArtwork();
+    this.renderClusterSVG();
+    this.notifyTextureUpdate();
+  }
+
   undo() {
     if (this.undoStack.length === 0) return;
     const last = this.undoStack.pop();
 
-    if (last.action === 'add') {
+    if (last.action === 'face_fill') {
+      const list = this.faceArtworks.get(last.faceIndex) || [];
+      const idx = list.indexOf(last.spec);
+      if (idx >= 0) list.splice(idx, 1);
+      if (last.prevFill) {
+        list.unshift(last.prevFill);
+      }
+      this.redoStack.push(last);
+    } else if (last.action === 'add') {
       const list = this.faceArtworks.get(last.faceIndex) || [];
       const idx = list.indexOf(last.spec);
       if (idx >= 0) list.splice(idx, 1);
@@ -1476,6 +1675,14 @@ export class GraphicStudio {
         const list = this.faceArtworks.get(pair.faceIndex) || [];
         const idx = list.indexOf(pair.spec);
         if (idx >= 0) list.splice(idx, 1);
+      });
+      this.redoStack.push(last);
+    } else if (last.action === 'delete_multi') {
+      last.pairs.forEach(pair => {
+        if (!this.faceArtworks.has(pair.faceIndex)) {
+          this.faceArtworks.set(pair.faceIndex, []);
+        }
+        this.faceArtworks.get(pair.faceIndex).push(pair.spec);
       });
       this.redoStack.push(last);
     }
