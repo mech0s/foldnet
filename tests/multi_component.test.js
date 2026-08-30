@@ -1,4 +1,5 @@
 import fs from 'fs';
+import * as THREE from 'three';
 import { CADParser } from '../src/cadParser.js';
 import { NetUnfolder } from '../src/netUnfolder.js';
 import { AssemblyManager } from '../src/assemblyManager.js';
@@ -137,8 +138,14 @@ try {
 
   const manager = new AssemblyManager(assemblyPayload);
   assert(manager.parts.length === assemblyPayload.parts.length, 'AssemblyManager successfully loaded nested3.stl assembly');
-  console.log(`[nested3.stl] Global BBox: [${manager.globalBBox.min.map(v=>v.toFixed(1))}] to [${manager.globalBBox.max.map(v=>v.toFixed(1))}]`);
+  
+  manager.parts.forEach((p, idx) => {
+    assert(p.alignMatrix instanceof THREE.Matrix4, `Part ${idx + 1} has valid 3D alignMatrix`);
+    assert(p.alignTranslation instanceof THREE.Vector3, `Part ${idx + 1} has valid 3D alignTranslation`);
+    assert(p.alignQuaternion instanceof THREE.Quaternion, `Part ${idx + 1} has valid 3D alignQuaternion`);
+  });
 
+  console.log(`[nested3.stl] Global BBox: [${manager.globalBBox.min.map(v=>v.toFixed(1))}] to [${manager.globalBBox.max.map(v=>v.toFixed(1))}]`);
 } catch (e) {
   assert(false, `nested3.stl test failed with error: ${e.message}\n${e.stack}`);
 }

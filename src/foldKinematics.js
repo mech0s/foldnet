@@ -12,7 +12,11 @@ export class FoldKinematics {
     this.faceAdjacency = [];
     
     this.buildGraph();
-    this.selectDefaultRoot();
+    if (this.fold.raw && this.fold.raw._assembly && typeof this.fold.raw._assembly.rootFaceIndex === 'number') {
+      this.rootFaceIndex = this.fold.raw._assembly.rootFaceIndex;
+    } else {
+      this.selectDefaultRoot();
+    }
     this.buildSpanningTree();
   }
 

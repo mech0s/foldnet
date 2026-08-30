@@ -337,15 +337,6 @@ export class FoldRenderer {
       this.modelGroup.remove(child);
     }
 
-    const themeColors = [
-      this.currentTheme.frontColor,
-      0x38bdf8, // sky blue
-      0x4ade80, // emerald green
-      0xfb923c, // orange
-      0xa855f7, // purple
-      0xf43f5e  // rose
-    ];
-
     assemblyManager.parts.forEach((part, partIdx) => {
       const partGroup = new THREE.Group();
       partGroup.name = `part_${part.id}`;
@@ -354,7 +345,6 @@ export class FoldRenderer {
       const foldData = part.foldData;
       const origCoords = foldData.vertices;
       const partFaceMeshes = [];
-      const partColor = themeColors[partIdx % themeColors.length];
 
       foldData.facesVertices.forEach((faceVerts, fIdx) => {
         const indices = this.triangulateFace(faceVerts, origCoords);
@@ -392,12 +382,10 @@ export class FoldRenderer {
         geometryFront.computeVertexNormals();
 
         const matFront = new THREE.MeshStandardMaterial({
-          color: partColor,
+          color: this.currentTheme.frontColor,
           roughness: 0.4,
           metalness: 0.1,
-          side: THREE.FrontSide,
-          transparent: true,
-          opacity: 1.0
+          side: THREE.FrontSide
         });
         const frontMesh = new THREE.Mesh(geometryFront, matFront);
         frontMesh.castShadow = true;
@@ -413,9 +401,7 @@ export class FoldRenderer {
           color: this.currentTheme.backColor,
           roughness: 0.5,
           metalness: 0.05,
-          side: THREE.BackSide,
-          transparent: true,
-          opacity: 1.0
+          side: THREE.BackSide
         });
         const backMesh = new THREE.Mesh(geometryBack, matBack);
         backMesh.castShadow = true;
@@ -471,19 +457,10 @@ export class FoldRenderer {
     });
 
     this.centerModel();
-    this.highlightActivePart(assemblyManager.activePartIndex);
   }
 
   highlightActivePart(activePartIndex) {
-    if (!this.partMeshGroups || this.partMeshGroups.length <= 1) return;
-
-    this.partMeshGroups.forEach((pmg, idx) => {
-      const isActive = idx === activePartIndex;
-      pmg.faceMeshes.forEach(meshItem => {
-        meshItem.frontMesh.material.opacity = isActive ? 1.0 : 0.6;
-        meshItem.backMesh.material.opacity = isActive ? 1.0 : 0.6;
-      });
-    });
+    // 3D Assembly viewer renders all components cleanly and independently
   }
 
   /**
@@ -761,10 +738,24 @@ export class FoldRenderer {
       this.partMeshGroups.forEach((pmg) => {
         const faceMatrices = pmg.kinematics.evaluateTransforms(t);
 
-        // Apply explosion offset: as fold progresses towards 1.0 (3D), parts expand radially
+        // Apply 3D assembly alignment & radial explosion
         const exp = pmg.part.explosionVector || [0, 0, 0];
         const factor = explodedT * t;
-        pmg.group.position.set(exp[0] * factor, exp[1] * factor, exp[2] * factor);
+
+        if (pmg.part.alignQuaternion && pmg.part.alignTranslation) {
+          const qIdentity = new THREE.Quaternion();
+          const currentQ = qIdentity.clone().slerp(pmg.part.alignQuaternion, t);
+          pmg.group.quaternion.copy(currentQ);
+
+          const currentT = pmg.part.alignTranslation.clone().multiplyScalar(t);
+          pmg.group.position.set(
+            currentT.x + exp[0] * factor,
+            currentT.y + exp[1] * factor,
+            currentT.z + exp[2] * factor
+          );
+        } else {
+          pmg.group.position.set(exp[0] * factor, exp[1] * factor, exp[2] * factor);
+        }
 
         // Apply transforms to face groups
         pmg.faceMeshes.forEach((item, fIdx) => {
@@ -882,9 +873,14 @@ export class FoldRenderer {
 
     if (this.assemblyManager && this.assemblyManager.isAssembly) {
       this.assemblyManager.parts.forEach(p => {
-        p.foldData.vertices.forEach(v => {
-          box.expandByPoint(new THREE.Vector3(v[0], v[1], v[2]));
-        });
+        if (p.bbox && p.bbox.min && p.bbox.max) {
+          box.expandByPoint(new THREE.Vector3(...p.bbox.min));
+          box.expandByPoint(new THREE.Vector3(...p.bbox.max));
+        } else {
+          p.foldData.vertices.forEach(v => {
+            box.expandByPoint(new THREE.Vector3(v[0], v[1], v[2]));
+          });
+        }
       });
     } else if (this.fold) {
       this.fold.vertices.forEach(v => {
@@ -900,7 +896,7 @@ export class FoldRenderer {
     box.getSize(size);
 
     // Offset model so center is at origin (0, 0, 0)
-    this.modelGroup.position.set(-center.x, -center.y, 0);
+    this.modelGroup.position.set(-center.x, -center.y, -center.z);
 
     const maxDim = Math.max(size.x, size.y, size.z, 2);
     this.camera.far = Math.max(10000, maxDim * 20);

@@ -68,6 +68,8 @@ export class AssemblyManager {
           (bbox.min[2] + bbox.max[2]) / 2
         ];
 
+        const alignTransform = this.computePartAlignmentTransform(foldJson, parsedFold);
+
         this.parts.push({
           id: p.id || `part_${idx}`,
           name: p.name || foldJson.file_title || `Component ${idx + 1}`,
@@ -77,6 +79,9 @@ export class AssemblyManager {
           bbox,
           center,
           isVisible: true,
+          alignMatrix: alignTransform.matrix,
+          alignTranslation: alignTransform.translation,
+          alignQuaternion: alignTransform.quaternion,
           explosionVector: [0, 0, 0]
         });
       });
@@ -91,6 +96,7 @@ export class AssemblyManager {
         (bbox.min[1] + bbox.max[1]) / 2,
         (bbox.min[2] + bbox.max[2]) / 2
       ];
+      const alignTransform = this.computePartAlignmentTransform(payload, parsedFold);
 
       this.parts.push({
         id: 'part_0',
@@ -101,6 +107,9 @@ export class AssemblyManager {
         bbox,
         center,
         isVisible: true,
+        alignMatrix: alignTransform.matrix,
+        alignTranslation: alignTransform.translation,
+        alignQuaternion: alignTransform.quaternion,
         explosionVector: [0, 0, 0]
       });
     }
@@ -110,6 +119,68 @@ export class AssemblyManager {
     if (this.parts.length > 0) {
       this.emit('partSelected', this.getActivePart());
     }
+  }
+
+  /**
+   * Computes the 3D rigid alignment transformation from local 2D root face coordinates to original 3D CAD space.
+   */
+  computePartAlignmentTransform(foldJson, parsedFold) {
+    const assemblyMeta = foldJson._assembly;
+    if (!assemblyMeta || !assemblyMeta.rootFace3DVertices || assemblyMeta.rootFace3DVertices.length < 3) {
+      return {
+        matrix: new THREE.Matrix4(),
+        translation: new THREE.Vector3(0, 0, 0),
+        quaternion: new THREE.Quaternion()
+      };
+    }
+
+    const rootIdx = assemblyMeta.rootFaceIndex !== undefined ? assemblyMeta.rootFaceIndex : 0;
+    const root2DIndices = parsedFold.facesVertices[rootIdx];
+    if (!root2DIndices || root2DIndices.length < 3) {
+      return {
+        matrix: new THREE.Matrix4(),
+        translation: new THREE.Vector3(0, 0, 0),
+        quaternion: new THREE.Quaternion()
+      };
+    }
+
+    const root2DVerts = root2DIndices.map(vi => parsedFold.vertices[vi]);
+    const root3DVerts = assemblyMeta.rootFace3DVertices;
+
+    // 2D root face basis (in flat 2D net coordinate system, Z=0):
+    const p0_2D = new THREE.Vector3(root2DVerts[0][0], root2DVerts[0][1], 0);
+    const p1_2D = new THREE.Vector3(root2DVerts[1][0], root2DVerts[1][1], 0);
+    const u2D = new THREE.Vector3().subVectors(p1_2D, p0_2D).normalize();
+    const w2D = new THREE.Vector3(0, 0, 1);
+    const v2D = new THREE.Vector3().crossVectors(w2D, u2D).normalize();
+
+    // 3D root face basis in CAD model space:
+    const p0_3D = new THREE.Vector3(...root3DVerts[0]);
+    const p1_3D = new THREE.Vector3(...root3DVerts[1]);
+    const u3D = new THREE.Vector3().subVectors(p1_3D, p0_3D).normalize();
+
+    let nx = 0, ny = 0, nz = 0;
+    const n = root3DVerts.length;
+    for (let i = 0; i < n; i++) {
+      const c = root3DVerts[i], nxt = root3DVerts[(i + 1) % n];
+      nx += (c[1] - nxt[1]) * (c[2] + nxt[2]);
+      ny += (c[2] - nxt[2]) * (c[0] + nxt[0]);
+      nz += (c[0] - nxt[0]) * (c[1] + nxt[1]);
+    }
+    const len = Math.hypot(nx, ny, nz);
+    const w3D = len > 1e-6 ? new THREE.Vector3(nx / len, ny / len, nz / len) : new THREE.Vector3(0, 0, 1);
+    const v3D = new THREE.Vector3().crossVectors(w3D, u3D).normalize();
+
+    const m2D = new THREE.Matrix4().makeBasis(u2D, v2D, w2D).setPosition(p0_2D);
+    const m3D = new THREE.Matrix4().makeBasis(u3D, v3D, w3D).setPosition(p0_3D);
+
+    const matrix = new THREE.Matrix4().multiplyMatrices(m3D, m2D.clone().invert());
+    const translation = new THREE.Vector3();
+    const quaternion = new THREE.Quaternion();
+    const scale = new THREE.Vector3();
+    matrix.decompose(translation, quaternion, scale);
+
+    return { matrix, translation, quaternion };
   }
 
   computeBBoxFromFold(foldData) {
