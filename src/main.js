@@ -69,15 +69,15 @@ class App {
     if (!studioContainer) return;
 
     this.graphicStudio = new GraphicStudio(studioContainer, {
-      onTextureUpdate: (artworks) => {
+      onTextureUpdate: (artworks, partIdx) => {
         if (this.renderer) {
-          this.renderer.updateFaceArtworks(artworks);
+          this.renderer.updateFaceArtworks(artworks, partIdx);
         }
         if (this.previewRenderer) {
-          this.previewRenderer.updateFaceArtworks(artworks);
+          this.previewRenderer.updateFaceArtworks(artworks, partIdx);
         }
         if (this.studioPreviewRenderer) {
-          this.studioPreviewRenderer.updateFaceArtworks(artworks);
+          this.studioPreviewRenderer.updateFaceArtworks(artworks, partIdx);
         }
       }
     });

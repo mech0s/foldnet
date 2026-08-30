@@ -22,7 +22,9 @@ export class GraphicStudio {
     this.faceAdjacency3D = [];
     this.currentCluster = null;
 
-    // SVG Artwork storage per face: Map<faceIndex, Array<SVGElementSpec>>
+    // SVG Artwork storage per part: Map<partIndex, Map<faceIndex, Array<SVGElementSpec>>>
+    this.partArtworksMap = new Map();
+    this.currentPartIndex = 0;
     this.faceArtworks = new Map();
 
     // Tools: 'select', 'rect', 'circle', 'text', 'stamp'
@@ -263,7 +265,7 @@ export class GraphicStudio {
       }
       const activePart = assemblyManager.getActivePart();
       if (activePart) {
-        this.loadModel(activePart.foldData, activePart.kinematics);
+        this.loadModel(activePart.foldData, activePart.kinematics, null, assemblyManager.activePartIndex);
       }
     } else {
       if (this.thumbnailStrip) {
@@ -271,7 +273,7 @@ export class GraphicStudio {
       }
       if (assemblyManager) {
         const activePart = assemblyManager.getActivePart();
-        if (activePart) this.loadModel(activePart.foldData, activePart.kinematics);
+        if (activePart) this.loadModel(activePart.foldData, activePart.kinematics, null, 0);
       }
     }
   }
@@ -360,10 +362,20 @@ export class GraphicStudio {
     });
   }
 
-  loadModel(foldData, kinematics = null, cadDualGraph = null) {
+  loadModel(foldData, kinematics = null, cadDualGraph = null, partIndex = 0) {
     this.foldData = foldData;
     this.kinematics = kinematics;
     this.cadDualGraph = cadDualGraph;
+    this.currentPartIndex = partIndex;
+
+    // Load or create artwork storage for this specific part
+    if (!this.partArtworksMap.has(partIndex)) {
+      this.partArtworksMap.set(partIndex, new Map());
+    }
+    this.faceArtworks = this.partArtworksMap.get(partIndex);
+    if (this.assemblyManager && this.assemblyManager.parts[partIndex]) {
+      this.assemblyManager.parts[partIndex].faceArtworks = this.faceArtworks;
+    }
 
     this.faceAdjacency3D = CrossSeamMapper.build3DAdjacency(foldData, kinematics, cadDualGraph);
     this.focusFaceIndex = 0;
@@ -914,8 +926,11 @@ export class GraphicStudio {
   }
 
   notifyTextureUpdate() {
+    if (this.assemblyManager && this.assemblyManager.parts[this.currentPartIndex]) {
+      this.assemblyManager.parts[this.currentPartIndex].faceArtworks = this.faceArtworks;
+    }
     if (this.onTextureUpdate) {
-      this.onTextureUpdate(this.faceArtworks);
+      this.onTextureUpdate(this.faceArtworks, this.currentPartIndex);
     }
   }
 

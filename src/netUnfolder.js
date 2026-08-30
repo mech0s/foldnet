@@ -96,10 +96,20 @@ export class NetUnfolder {
    * @returns {{isAssembly: boolean, title: string, parts: Array<{id: string, name: string, foldData: object, bbox: object, center: number[]}>}}
    */
   static unfoldAssemblyToFold(components, seed = 1, maxAttempts = 500) {
-    const parts = [];
+    // Sort components by 3D centroid X coordinate to match natural left-to-right 3D layout
+    const sortedComponents = [...components].map((comp, originalIdx) => ({
+      comp,
+      originalIdx
+    }));
+    sortedComponents.sort((a, b) => (a.comp.center[0] - b.comp.center[0]));
 
-    components.forEach((comp, idx) => {
-      const partSeed = typeof seed === 'number' ? seed + idx * 7919 : seed;
+    // Compute overall assembly 3D centroid X
+    const globalCenterX = components.reduce((sum, c) => sum + (c.center ? c.center[0] : 0), 0) / (components.length || 1);
+
+    // First pass: unroll each component and measure local 2D dimensions
+    const unrolled = [];
+    sortedComponents.forEach(({ comp, originalIdx }) => {
+      const partSeed = typeof seed === 'number' ? seed + originalIdx * 7919 : seed;
       const partFold = this.unfoldToFoldJSON(comp.vertices, comp.facesVertices, partSeed, maxAttempts, {
         componentId: comp.id,
         name: comp.name,
@@ -109,12 +119,49 @@ export class NetUnfolder {
       });
       partFold.file_title = comp.name;
 
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      partFold.vertices_coords.forEach(p => {
+        if (p[0] < minX) minX = p[0];
+        if (p[0] > maxX) maxX = p[0];
+        if (p[1] < minY) minY = p[1];
+        if (p[1] > maxY) maxY = p[1];
+      });
+
+      const partW = maxX - minX;
+      const partH = maxY - minY;
+      const partMidY = (minY + maxY) / 2;
+      const gap = Math.max(Math.max(partW, partH) * 0.10, 8);
+
+      unrolled.push({
+        comp,
+        partFold,
+        minX, maxX, minY, maxY,
+        partW, partH, partMidY, gap
+      });
+    });
+
+    // Compute total 2D array width to center symmetrically left and right of globalCenterX
+    const totalWidth = unrolled.reduce((sum, u, i) => sum + u.partW + (i < unrolled.length - 1 ? u.gap : 0), 0);
+    let currentXOffset = globalCenterX - totalWidth / 2;
+
+    const parts = [];
+    unrolled.forEach(u => {
+      const dx = currentXOffset - u.minX;
+      const dy = -u.partMidY;
+
+      u.partFold.vertices_coords.forEach(p => {
+        p[0] = Math.round((p[0] + dx) * 1000) / 1000;
+        p[1] = Math.round((p[1] + dy) * 1000) / 1000;
+      });
+
+      currentXOffset += u.partW + u.gap;
+
       parts.push({
-        id: comp.id,
-        name: comp.name,
-        foldData: partFold,
-        bbox: comp.bbox,
-        center: comp.center
+        id: u.comp.id,
+        name: u.comp.name,
+        foldData: u.partFold,
+        bbox: u.comp.bbox,
+        center: u.comp.center
       });
     });
 

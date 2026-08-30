@@ -474,13 +474,35 @@ export class FoldRenderer {
    * so the artwork is rendered at the correct position, rotation & scale on the
    * 512×512 canvas texture that is UV-mapped to the 3D face.
    */
-  updateFaceArtworks(faceArtworks) {
+  updateFaceArtworks(faceArtworks, activePartIndex = 0) {
     if (!this.faceMeshes || this.faceMeshes.length === 0) return;
 
-    const origCoords = this.fold ? this.fold.vertices : null;
+    this.faceMeshes.forEach((meshItem) => {
+      const partIdx = meshItem.partIndex !== undefined ? meshItem.partIndex : 0;
+      const fIdx = meshItem.faceIndex !== undefined ? meshItem.faceIndex : 0;
 
-    this.faceMeshes.forEach((meshItem, fIdx) => {
-      const artworks = faceArtworks ? (faceArtworks.get(fIdx) || []) : [];
+      // Resolve artworks for this mesh item
+      let artworks = [];
+      if (this.assemblyManager && this.assemblyManager.isAssembly) {
+        const part = this.assemblyManager.parts[partIdx];
+        if (part && part.faceArtworks) {
+          artworks = part.faceArtworks.get(fIdx) || [];
+        } else if (partIdx === activePartIndex && faceArtworks) {
+          artworks = faceArtworks.get(fIdx) || [];
+        }
+      } else if (faceArtworks) {
+        artworks = faceArtworks.get(fIdx) || [];
+      }
+
+      // Resolve original 2D net vertices for this part
+      let origCoords = null;
+      if (this.assemblyManager && this.assemblyManager.isAssembly) {
+        const part = this.assemblyManager.parts[partIdx];
+        if (part && part.foldData) origCoords = part.foldData.vertices;
+      } else if (this.fold) {
+        origCoords = this.fold.vertices;
+      }
+
       const frontMesh = meshItem.frontMesh;
 
       if (artworks.length === 0) {
