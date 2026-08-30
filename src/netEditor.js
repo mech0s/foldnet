@@ -78,14 +78,15 @@ export class NetEditor {
 
   selectPart(partIndex) {
     if (this.assemblyManager && this.assemblyManager.parts[partIndex]) {
-      this.assemblyManager.setActivePartIndex(partIndex);
-      if (this.thumbnailStrip) {
-        this.thumbnailStrip.update(this.assemblyManager.parts, partIndex);
-      }
-      const part = this.assemblyManager.parts[partIndex];
-      this.loadFoldJSON(part.foldJson || part.foldData, true);
       if (this.onSelectAssemblyPart) {
         this.onSelectAssemblyPart(partIndex);
+      } else {
+        this.assemblyManager.setActivePartIndex(partIndex);
+        if (this.thumbnailStrip) {
+          this.thumbnailStrip.selectPart(partIndex);
+        }
+        const part = this.assemblyManager.parts[partIndex];
+        this.loadFoldJSON(part.foldJson || part.foldData, true);
       }
     }
   }

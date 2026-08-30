@@ -29,6 +29,29 @@ export class PartThumbnailStrip {
     this.render();
   }
 
+  /**
+   * Visually highlights the selected active part without full DOM rebuild.
+   * @param {number} partIndex
+   */
+  selectPart(partIndex) {
+    this.activeIndex = partIndex;
+    const cards = this.wrapper.querySelectorAll('.part-card');
+    cards.forEach((card, idx) => {
+      card.classList.toggle('active', idx === partIndex);
+      const existingTag = card.querySelector('.part-card-active-tag');
+      if (idx === partIndex) {
+        if (!existingTag) {
+          const tag = document.createElement('span');
+          tag.className = 'part-card-active-tag';
+          tag.textContent = 'ACTIVE';
+          card.appendChild(tag);
+        }
+      } else if (existingTag) {
+        existingTag.remove();
+      }
+    });
+  }
+
   render() {
     this.wrapper.innerHTML = '';
 

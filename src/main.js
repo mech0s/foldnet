@@ -10,7 +10,24 @@ import { AssemblyManager } from './assemblyManager.js';
 class App {
   constructor() {
     this.container = document.getElementById('canvas-container');
-    this.renderer = new FoldRenderer(this.container);
+    this.renderer = new FoldRenderer(this.container, {
+      onFaceClick: (faceIdx, partIdx) => {
+        if (this.assemblyManager && this.assemblyManager.isAssembly) {
+          if (partIdx !== undefined && partIdx !== this.assemblyManager.activePartIndex) {
+            this.onSelectAssemblyPart(partIdx);
+            if (this.graphicStudio && this.graphicStudio.thumbnailStrip) {
+              this.graphicStudio.thumbnailStrip.selectPart(partIdx);
+            }
+            if (this.netEditor && this.netEditor.thumbnailStrip) {
+              this.netEditor.thumbnailStrip.selectPart(partIdx);
+            }
+          }
+        }
+        if (this.graphicStudio) {
+          this.graphicStudio.setFocusFace(faceIdx);
+        }
+      }
+    });
 
     this.assemblyManager = new AssemblyManager();
     this.foldData = null;
@@ -69,7 +86,18 @@ class App {
     if (studioPreviewContainer) {
       this.studioPreviewRenderer = new FoldRenderer(studioPreviewContainer, {
         showCreases: true,
-        onFaceClick: (faceIdx) => {
+        onFaceClick: (faceIdx, partIdx) => {
+          if (this.assemblyManager && this.assemblyManager.isAssembly) {
+            if (partIdx !== undefined && partIdx !== this.assemblyManager.activePartIndex) {
+              this.onSelectAssemblyPart(partIdx);
+              if (this.graphicStudio && this.graphicStudio.thumbnailStrip) {
+                this.graphicStudio.thumbnailStrip.selectPart(partIdx);
+              }
+              if (this.netEditor && this.netEditor.thumbnailStrip) {
+                this.netEditor.thumbnailStrip.selectPart(partIdx);
+              }
+            }
+          }
           if (this.graphicStudio) {
             this.graphicStudio.setFocusFace(faceIdx);
           }
@@ -315,12 +343,31 @@ class App {
     if (activePart) {
       this.foldData = activePart.foldData;
       this.kinematics = activePart.kinematics;
+
+      // 1. Update Net Editor with selected part
+      if (this.netEditor) {
+        if (this.netEditor.thumbnailStrip) {
+          this.netEditor.thumbnailStrip.selectPart(partIndex);
+        }
+        this.netEditor.loadFoldJSON(activePart.foldJson || activePart.foldData, true);
+      }
+
+      // 2. Update Graphic Studio with selected part (updates main cluster view & Net Overview mini map)
+      if (this.graphicStudio) {
+        if (this.graphicStudio.thumbnailStrip) {
+          this.graphicStudio.thumbnailStrip.selectPart(partIndex);
+        }
+        this.graphicStudio.loadModel(activePart.foldData, activePart.kinematics);
+      }
+
+      // 3. Update Net Editor 3D Preview Sidebar
       if (this.previewRenderer) {
         this.previewFoldData = activePart.foldData;
         this.previewKinematics = activePart.kinematics;
         this.previewRenderer.buildModel(this.foldData, this.kinematics);
         this.updatePreviewFoldProgress();
       }
+
       this.updateInspectorUI();
     }
   }

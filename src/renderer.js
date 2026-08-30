@@ -124,7 +124,9 @@ export class FoldRenderer {
         if (intersects.length > 0) {
           const hitMesh = intersects[0].object;
           if (hitMesh.userData && hitMesh.userData.faceIndex !== undefined) {
-            this.onFaceClick(hitMesh.userData.faceIndex);
+            const faceIdx = hitMesh.userData.faceIndex;
+            const partIdx = hitMesh.userData.partIndex !== undefined ? hitMesh.userData.partIndex : 0;
+            this.onFaceClick(faceIdx, partIdx, hitMesh.userData);
           }
         }
       }
