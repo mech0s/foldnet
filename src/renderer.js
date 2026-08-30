@@ -126,7 +126,8 @@ export class FoldRenderer {
           if (hitMesh.userData && hitMesh.userData.faceIndex !== undefined) {
             const faceIdx = hitMesh.userData.faceIndex;
             const partIdx = hitMesh.userData.partIndex !== undefined ? hitMesh.userData.partIndex : 0;
-            this.onFaceClick(faceIdx, partIdx, hitMesh.userData);
+            const cameraUp = new THREE.Vector3(0, 1, 0).applyQuaternion(this.camera.quaternion).normalize();
+            this.onFaceClick(faceIdx, partIdx, hitMesh.userData, cameraUp);
           }
         }
       }

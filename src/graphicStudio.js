@@ -431,7 +431,8 @@ export class GraphicStudio {
     this.maxZoom = this.zoom * 50.0;
   }
 
-  setFocusFace(faceIdx) {
+  setFocusFace(faceIdx, cameraUp = null) {
+    if (cameraUp) this.lastCameraUp = cameraUp;
     if (faceIdx >= 0 && faceIdx < this.foldData.facesVertices.length) {
       this.focusFaceIndex = faceIdx;
       this.updateClusterView();
@@ -444,11 +445,19 @@ export class GraphicStudio {
     if (!this.foldData) return;
 
     const depth = this.clusterDepth || 4;
+    let alignMatrix = null;
+    if (this.assemblyManager && this.assemblyManager.parts && this.assemblyManager.parts[this.currentPartIndex]) {
+      alignMatrix = this.assemblyManager.parts[this.currentPartIndex].alignMatrix;
+    }
+
     this.currentCluster = CrossSeamMapper.buildNeighborCluster(
       this.focusFaceIndex,
       this.foldData,
       this.faceAdjacency3D,
-      depth
+      depth,
+      this.kinematics,
+      alignMatrix,
+      this.lastCameraUp
     );
 
     this.container.querySelector('#lbl-focus-face').textContent = `F${this.focusFaceIndex}`;

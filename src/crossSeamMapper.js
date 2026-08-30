@@ -119,7 +119,8 @@ export class CrossSeamMapper {
 
   /**
    * Builds the local 2D cluster layout for a given focus face F0.
-   * Focus face F0 is placed centered at (0, 0).
+   * Focus face F0 is placed centered at (0, 0) and oriented to match its 3D folded upright orientation
+   * snapped to the closest 90-degree angle.
    * 
    * [CO-PLANAR ISLAND + CARDINAL RAYS UNPACKING]:
    * 1. Tier 1 (Co-Planar Island): Expands in ALL directions across connected 3D co-planar
@@ -128,7 +129,7 @@ export class CrossSeamMapper {
    *    rays expand "onwards and upwards" across 3D hinges up to `maxDepth`.
    * 3. Prevents lateral overlap/ambiguity while showing full flat segmented face assemblies.
    */
-  static buildNeighborCluster(focusFaceIdx, foldData, faceAdjacency3D, maxDepth = 4) {
+  static buildNeighborCluster(focusFaceIdx, foldData, faceAdjacency3D, maxDepth = 4, kinematics = null, alignMatrix = null, cameraUp = null) {
     const origCoords = foldData.vertices;
     const focusFaceVerts2D = foldData.facesVertices[focusFaceIdx];
 
@@ -139,8 +140,52 @@ export class CrossSeamMapper {
     cx /= f0Coords2D.length;
     cy /= f0Coords2D.length;
 
-    // Centered F0 local coordinates
-    const localF0 = f0Coords2D.map(p => [p[0] - cx, p[1] - cy]);
+    // Compute 90-degree snap angle relative to 3D folded or apparent viewport orientation
+    let snapAngle = 0;
+    if (kinematics) {
+      const transforms = kinematics.evaluateTransforms(1.0);
+      const mat = transforms ? (transforms[focusFaceIdx] || new THREE.Matrix4()) : new THREE.Matrix4();
+      const worldMat = alignMatrix ? new THREE.Matrix4().multiplyMatrices(alignMatrix, mat) : mat;
+
+      const p0 = new THREE.Vector3(cx, cy, 0).applyMatrix4(worldMat);
+      const pu = new THREE.Vector3(cx + 1, cy, 0).applyMatrix4(worldMat).sub(p0).normalize();
+      const pv = new THREE.Vector3(cx, cy + 1, 0).applyMatrix4(worldMat).sub(p0).normalize();
+      const pn = new THREE.Vector3().crossVectors(pu, pv).normalize();
+
+      // Target 3D Up vector:
+      // If cameraUp is provided (from clicked viewport), use apparent viewport up direction;
+      // otherwise fallback to canonical 3D up (+Y for vertical, -Z for horizontal).
+      let targetUp;
+      if (cameraUp) {
+        targetUp = cameraUp;
+      } else if (Math.abs(pn.y) >= 0.85) {
+        targetUp = pn.y > 0 ? new THREE.Vector3(0, 0, -1) : new THREE.Vector3(0, 0, 1);
+      } else {
+        targetUp = new THREE.Vector3(0, 1, 0);
+      }
+
+      const uProj = targetUp.dot(pu);
+      const vProj = targetUp.dot(pv);
+      // Angle required to rotate the targetUp direction (uProj, vProj) to point UP (0, 1) on the 2D canvas:
+      const targetAngle = Math.PI / 2 - Math.atan2(vProj, uProj);
+      const k = Math.round(targetAngle / (Math.PI / 2));
+      snapAngle = k * (Math.PI / 2);
+    }
+
+    const cosA = Math.round(Math.cos(snapAngle));
+    const sinA = Math.round(Math.sin(snapAngle));
+
+    // Centered & 90-deg rotated F0 local coordinates:
+    // px' = cosA * (x - cx) - sinA * (y - cy)
+    // py' = sinA * (x - cx) + cosA * (y - cy)
+    const localF0 = f0Coords2D.map(p => {
+      const px = p[0] - cx;
+      const py = p[1] - cy;
+      return [
+        Math.round((cosA * px - sinA * py) * 1000) / 1000,
+        Math.round((sinA * px + cosA * py) * 1000) / 1000
+      ];
+    });
 
     const clusterFaces = [];
     const clusterEdges = [];
@@ -160,9 +205,9 @@ export class CrossSeamMapper {
       branchId: -1,
       depth: 0,
       isCoPlanarWithFocus: true,
-      transformToNet: { tx: cx, ty: cy, rot: 0, scale: 1 },
-      clusterToNet: { a: 1, b: 0, c: 0, d: 1, e: cx, f: cy },
-      netToCluster: { a: 1, b: 0, c: 0, d: 1, e: -cx, f: -cy }
+      transformToNet: { tx: cx, ty: cy, rot: -snapAngle, scale: 1 },
+      clusterToNet: CrossSeamMapper.computeRigidAffine(localF0, f0Coords2D),
+      netToCluster: CrossSeamMapper.computeRigidAffine(f0Coords2D, localF0)
     });
 
     // Seed the BFS queue with all edges of focus face F0 (initiating Cardinal Branches 0..N-1)

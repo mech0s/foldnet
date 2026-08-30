@@ -11,7 +11,7 @@ class App {
   constructor() {
     this.container = document.getElementById('canvas-container');
     this.renderer = new FoldRenderer(this.container, {
-      onFaceClick: (faceIdx, partIdx) => {
+      onFaceClick: (faceIdx, partIdx, userData, cameraUp) => {
         if (this.assemblyManager && this.assemblyManager.isAssembly) {
           if (partIdx !== undefined && partIdx !== this.assemblyManager.activePartIndex) {
             this.onSelectAssemblyPart(partIdx);
@@ -24,7 +24,7 @@ class App {
           }
         }
         if (this.graphicStudio) {
-          this.graphicStudio.setFocusFace(faceIdx);
+          this.graphicStudio.setFocusFace(faceIdx, cameraUp);
         }
       }
     });
@@ -89,7 +89,7 @@ class App {
     if (studioPreviewContainer) {
       this.studioPreviewRenderer = new FoldRenderer(studioPreviewContainer, {
         showCreases: true,
-        onFaceClick: (faceIdx, partIdx) => {
+        onFaceClick: (faceIdx, partIdx, userData, cameraUp) => {
           if (this.assemblyManager && this.assemblyManager.isAssembly) {
             if (partIdx !== undefined && partIdx !== this.assemblyManager.activePartIndex) {
               this.onSelectAssemblyPart(partIdx);
@@ -102,7 +102,7 @@ class App {
             }
           }
           if (this.graphicStudio) {
-            this.graphicStudio.setFocusFace(faceIdx);
+            this.graphicStudio.setFocusFace(faceIdx, cameraUp);
           }
         }
       });
