@@ -515,20 +515,26 @@ export class FoldRenderer {
         return;
       }
 
-      // Create high-res canvas texture for this face
+      const bounds = meshItem.faceBounds;
+      const maxDim = Math.max(bounds.width, bounds.height, 1e-4);
+      // Determine pixel resolution driven by the larger dimension (1024px base)
+      const targetPPU = 1024 / maxDim;
+      const canvasW = Math.max(32, Math.min(2048, Math.round(bounds.width * targetPPU)));
+      const canvasH = Math.max(32, Math.min(2048, Math.round(bounds.height * targetPPU)));
+
+      // Create high-res canvas texture tailored to this face's physical aspect ratio
       const canvas = document.createElement('canvas');
-      canvas.width = 512;
-      canvas.height = 512;
+      canvas.width = canvasW;
+      canvas.height = canvasH;
       const ctx = canvas.getContext('2d');
 
       // Base background color
       const bgHex = '#' + this.currentTheme.frontColor.toString(16).padStart(6, '0');
       ctx.fillStyle = bgHex;
-      ctx.fillRect(0, 0, 512, 512);
+      ctx.fillRect(0, 0, canvasW, canvasH);
 
-      const bounds = meshItem.faceBounds;
-      const sx = 512 / bounds.width;
-      const sy = 512 / bounds.height;
+      const sx = canvasW / bounds.width;
+      const sy = canvasH / bounds.height;
 
       // Clip canvas drawing to the face polygon boundary in 2D net coordinates
       if (origCoords && meshItem.faceVerts) {
@@ -573,6 +579,10 @@ export class FoldRenderer {
 
       const texture = new THREE.CanvasTexture(canvas);
       texture.colorSpace = THREE.SRGBColorSpace;
+      texture.minFilter = THREE.LinearMipmapLinearFilter;
+      texture.magFilter = THREE.LinearFilter;
+      texture.generateMipmaps = true;
+      texture.anisotropy = 8;
       texture.needsUpdate = true;
 
       frontMesh.material.map = texture;
