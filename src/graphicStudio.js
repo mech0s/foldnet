@@ -288,7 +288,7 @@ export class GraphicStudio {
           this.thumbnailStrip.selectPart(partIndex);
         }
         const part = this.assemblyManager.parts[partIndex];
-        this.loadModel(part.foldData, part.kinematics);
+        this.loadModel(part.foldData, part.kinematics, null, partIndex);
       }
     }
   }

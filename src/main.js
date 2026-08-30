@@ -70,6 +70,9 @@ class App {
 
     this.graphicStudio = new GraphicStudio(studioContainer, {
       onTextureUpdate: (artworks, partIdx) => {
+        if (this.assemblyManager && this.assemblyManager.parts && this.assemblyManager.parts[partIdx]) {
+          this.assemblyManager.parts[partIdx].faceArtworks = artworks;
+        }
         if (this.renderer) {
           this.renderer.updateFaceArtworks(artworks, partIdx);
         }
@@ -357,7 +360,7 @@ class App {
         if (this.graphicStudio.thumbnailStrip) {
           this.graphicStudio.thumbnailStrip.selectPart(partIndex);
         }
-        this.graphicStudio.loadModel(activePart.foldData, activePart.kinematics);
+        this.graphicStudio.loadModel(activePart.foldData, activePart.kinematics, null, partIndex);
       }
 
       // 3. Update Net Editor 3D Preview Sidebar
