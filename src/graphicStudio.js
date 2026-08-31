@@ -79,6 +79,11 @@ export class GraphicStudio {
           <div class="header-left">
             <span class="cluster-badge">Neighbor Cluster Canvas</span>
             <span class="current-face-indicator">Focus Face: <strong id="lbl-focus-face">F0</strong></span>
+            <div class="cluster-legend">
+              <span class="legend-item"><span class="dot fold-dot"></span>Fold</span>
+              <span class="legend-item"><span class="dot cut-dot"></span>3D Seam</span>
+              <span class="legend-item"><span class="dot accidental-dot"></span>Accidental 2D</span>
+            </div>
           </div>
 
           <div class="header-center">
@@ -985,6 +990,50 @@ export class GraphicStudio {
     this.renderClusterSVG();
   }
 
+  /**
+   * Computes the shared 1D collinear overlap between two 2D segments [p1, p2] and [q1, q2].
+   * Handles subsegments, partial overlaps, and unequal edge lengths accurately.
+   */
+  computeCollinearOverlapSegment(p1, p2, q1, q2, distTol = 0.05, minOverlap = 1e-3) {
+    const dx = p2[0] - p1[0];
+    const dy = p2[1] - p1[1];
+    const lenP = Math.hypot(dx, dy);
+    if (lenP < 1e-6) return null;
+
+    const ux = dx / lenP;
+    const uy = dy / lenP;
+    const nx = -uy;
+    const ny = ux;
+
+    // Perpendicular distance of q1 and q2 to line through p1-p2
+    const d1 = Math.abs((q1[0] - p1[0]) * nx + (q1[1] - p1[1]) * ny);
+    const d2 = Math.abs((q2[0] - p1[0]) * nx + (q2[1] - p1[1]) * ny);
+
+    if (d1 > distTol || d2 > distTol) return null;
+
+    // Project onto line coordinate t along u
+    const tQ1 = (q1[0] - p1[0]) * ux + (q1[1] - p1[1]) * uy;
+    const tQ2 = (q2[0] - p1[0]) * ux + (q2[1] - p1[1]) * uy;
+
+    const minQ = Math.min(tQ1, tQ2);
+    const maxQ = Math.max(tQ1, tQ2);
+
+    const tStart = Math.max(0, minQ);
+    const tEnd = Math.min(lenP, maxQ);
+
+    const overlapLen = tEnd - tStart;
+    if (overlapLen <= minOverlap) return null;
+
+    const overlapP1 = [p1[0] + tStart * ux, p1[1] + tStart * uy];
+    const overlapP2 = [p1[0] + tEnd * ux, p1[1] + tEnd * uy];
+
+    return {
+      overlapLen,
+      p1: overlapP1,
+      p2: overlapP2
+    };
+  }
+
   renderClusterSVG() {
     if (!this.currentCluster) return;
 
@@ -1088,16 +1137,99 @@ export class GraphicStudio {
       this.rootGroup.appendChild(faceLayer);
     });
 
-    // 3. Render Edge Hinges & Seam indicators
-    cluster.clusterEdges.forEach(e => {
-      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-      line.setAttribute('x1', e.p1[0]);
-      line.setAttribute('y1', e.p1[1]);
-      line.setAttribute('x2', e.p2[0]);
-      line.setAttribute('y2', e.p2[1]);
-      line.setAttribute('class', e.isFoldHinge ? 'cluster-crease fold' : 'cluster-crease cut-seam');
-      this.rootGroup.appendChild(line);
-    });
+    // 3. Render Edge Taxonomy: Fold Hinges, Touching 3D Cut Seams & Accidental 2D Edges
+    const tol = Math.max(0.05, 0.5 * (this.modelUnitScale || 1));
+    const invZoom = Math.max(0.001, 1 / (this.zoom || 1));
+    const numFaces = cluster.clusterFaces.length;
+
+    for (let i = 0; i < numFaces; i++) {
+      const fA = cluster.clusterFaces[i];
+      const polyA = fA.polygon;
+      const nA = polyA.length;
+
+      for (let j = i + 1; j < numFaces; j++) {
+        const fB = cluster.clusterFaces[j];
+        const polyB = fB.polygon;
+        const nB = polyB.length;
+
+        for (let ea = 0; ea < nA; ea++) {
+          const ap1 = polyA[ea];
+          const ap2 = polyA[(ea + 1) % nA];
+
+          for (let eb = 0; eb < nB; eb++) {
+            const bp1 = polyB[eb];
+            const bp2 = polyB[(eb + 1) % nB];
+
+            const overlap = this.computeCollinearOverlapSegment(ap1, ap2, bp1, bp2, tol);
+            if (!overlap) continue;
+
+            const midX = (overlap.p1[0] + overlap.p2[0]) * 0.5;
+            const midY = (overlap.p1[1] + overlap.p2[1]) * 0.5;
+
+            // Check if fA and fB are connected in 3D
+            const aNeighbors3D = this.faceAdjacency3D[fA.faceIndex] || [];
+            const is3DConnected = aNeighbors3D.some(n => n.neighborFace === fB.faceIndex);
+
+            if (is3DConnected) {
+              // Legitimate 3D crease / fold or touching 3D cut seam
+              const matchedClusterEdge = cluster.clusterEdges.find(e => {
+                const eMidX = (e.p1[0] + e.p2[0]) * 0.5;
+                const eMidY = (e.p1[1] + e.p2[1]) * 0.5;
+                return Math.hypot(midX - eMidX, midY - eMidY) < tol * 2;
+              });
+              const isFoldHinge = matchedClusterEdge ? matchedClusterEdge.isFoldHinge : true;
+
+              const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+              line.setAttribute('x1', overlap.p1[0]);
+              line.setAttribute('y1', overlap.p1[1]);
+              line.setAttribute('x2', overlap.p2[0]);
+              line.setAttribute('y2', overlap.p2[1]);
+              line.setAttribute('class', isFoldHinge ? 'cluster-crease fold' : 'cluster-crease cut-seam');
+              this.rootGroup.appendChild(line);
+            } else {
+              // ACCIDENTAL 2D ADJACENCY (Collinear touching / subsegment with NO 3D connection)
+              // 1. Hatched / Dual-Tone warning stroke (Strategy A)
+              const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+              line.setAttribute('x1', overlap.p1[0]);
+              line.setAttribute('y1', overlap.p1[1]);
+              line.setAttribute('x2', overlap.p2[0]);
+              line.setAttribute('y2', overlap.p2[1]);
+              line.setAttribute('class', 'cluster-crease accidental-edge');
+              this.rootGroup.appendChild(line);
+
+              // 2. Midpoint separation glyph badge (Strategy C)
+              const glyphG = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+              glyphG.setAttribute('class', 'accidental-edge-glyph');
+              
+              const badgeW = 20 * invZoom;
+              const badgeH = 14 * invZoom;
+              const rx = 3 * invZoom;
+              const fontSize = Math.max(0.001, 9 * invZoom);
+
+              const pill = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+              pill.setAttribute('x', midX - badgeW / 2);
+              pill.setAttribute('y', midY - badgeH / 2);
+              pill.setAttribute('width', badgeW);
+              pill.setAttribute('height', badgeH);
+              pill.setAttribute('rx', rx);
+              pill.setAttribute('class', 'accidental-glyph-badge');
+              glyphG.appendChild(pill);
+
+              const txt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+              txt.setAttribute('x', midX);
+              txt.setAttribute('y', -midY);
+              txt.setAttribute('transform', 'scale(1, -1)');
+              txt.setAttribute('class', 'accidental-glyph-text');
+              txt.setAttribute('font-size', `${fontSize}px`);
+              txt.textContent = '⫽'; // Double slash non-contact separation symbol
+              glyphG.appendChild(txt);
+
+              this.rootGroup.appendChild(glyphG);
+            }
+          }
+        }
+      }
+    }
   }
 
   /**

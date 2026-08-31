@@ -1393,6 +1393,10 @@ body {
   background: #f97316;
 }
 
+.cluster-legend .accidental-dot {
+  background: #f59e0b;
+}
+
 /* SVG Cluster Elements Styling */
 .cluster-face {
   stroke-width: 1.5px;
@@ -1448,6 +1452,31 @@ body {
   stroke-dasharray: 4, 3;
   stroke-linecap: round;
   vector-effect: non-scaling-stroke;
+}
+
+.cluster-crease.accidental-edge {
+  stroke: #f59e0b;
+  stroke-width: 2.5px;
+  stroke-dasharray: 4, 3;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.accidental-glyph-badge {
+  fill: rgba(15, 23, 42, 0.95);
+  stroke: #f59e0b;
+  stroke-width: 1px;
+  vector-effect: non-scaling-stroke;
+}
+
+.accidental-glyph-text {
+  font-family: var(--font-sans);
+  font-weight: 700;
+  fill: #fbbf24;
+  text-anchor: middle;
+  dominant-baseline: central;
+  user-select: none;
+  pointer-events: none;
 }
 
 .artwork-element {
