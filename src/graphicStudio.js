@@ -1387,6 +1387,28 @@ export class GraphicStudio {
     this.isDrawing = true;
     this.drawStart = pos;
 
+    // Dynamically resolve initiating face from pointer position (supports initiating from ANY face)
+    let initiatingFace = null;
+    if (this.currentCluster && this.currentCluster.clusterFaces) {
+      initiatingFace = this.currentCluster.clusterFaces.find(f => CrossSeamMapper.isPointInsidePoly([pos.x, pos.y], f.polygon));
+      if (!initiatingFace) {
+        let minDist = Infinity;
+        for (const f of this.currentCluster.clusterFaces) {
+          let fcx = 0, fcy = 0;
+          f.polygon.forEach(p => { fcx += p[0]; fcy += p[1]; });
+          fcx /= f.polygon.length;
+          fcy /= f.polygon.length;
+          const d = Math.hypot(pos.x - fcx, pos.y - fcy);
+          if (d < minDist) {
+            minDist = d;
+            initiatingFace = f;
+          }
+        }
+      }
+    }
+    this.drawStartFace = initiatingFace;
+    const startFaceIdx = initiatingFace ? initiatingFace.faceIndex : this.focusFaceIndex;
+
     if (this.activeTool === 'select') {
       this.isDrawing = false;
       return;
@@ -1394,13 +1416,8 @@ export class GraphicStudio {
 
     if (this.activeTool === 'fill') {
       this.isDrawing = false;
-      if (this.currentCluster && this.currentCluster.clusterFaces) {
-        for (const face of this.currentCluster.clusterFaces) {
-          if (CrossSeamMapper.isPointInsidePoly([rawPos.x, rawPos.y], face.polygon)) {
-            this.applyFaceFill(face);
-            return;
-          }
-        }
+      if (initiatingFace) {
+        this.applyFaceFill(initiatingFace);
       }
       return;
     }
@@ -1414,7 +1431,7 @@ export class GraphicStudio {
         y: pos.y - 20 * unitScale,
         scale: 1,
         unitScale: unitScale,
-        faceIndex: this.focusFaceIndex
+        faceIndex: startFaceIdx
       };
       this.addArtwork(spec);
       this.selectActiveArtwork(spec);
@@ -1433,7 +1450,7 @@ export class GraphicStudio {
         fontColor: this.fontColor || '#ffffff',
         textAlign: this.textAlign || 'left',
         stroke: 'none',
-        faceIndex: this.focusFaceIndex
+        faceIndex: startFaceIdx
       };
       this.addArtwork(spec);
       this.selectActiveArtwork(spec);
@@ -1505,6 +1522,8 @@ export class GraphicStudio {
     const previewElem = this.rootGroup.querySelector('#draw-preview');
     if (previewElem) previewElem.remove();
 
+    const startFaceIdx = this.drawStartFace ? this.drawStartFace.faceIndex : this.focusFaceIndex;
+
     if (this.activeTool === 'rect') {
       const w = Math.abs(pos.x - this.drawStart.x);
       const h = Math.abs(pos.y - this.drawStart.y);
@@ -1523,7 +1542,7 @@ export class GraphicStudio {
           fontColor: this.fontColor || '#ffffff',
           textAlign: this.textAlign || 'center',
           unitScale: unitScale,
-          faceIndex: this.focusFaceIndex
+          faceIndex: startFaceIdx
         };
         this.addArtwork(spec);
         this.selectActiveArtwork(spec);
@@ -1543,7 +1562,7 @@ export class GraphicStudio {
           fontColor: this.fontColor || '#ffffff',
           textAlign: this.textAlign || 'center',
           unitScale: unitScale,
-          faceIndex: this.focusFaceIndex
+          faceIndex: startFaceIdx
         };
         this.addArtwork(spec);
         this.selectActiveArtwork(spec);
@@ -1645,20 +1664,22 @@ export class GraphicStudio {
       }
     }
 
-    // Fallback: if boundary edge-case prevented bbox overlap, ensure focus face always receives artwork
+    // Fallback: if boundary edge-case prevented bbox overlap, ensure initiating face receives artwork
     if (addedPairs.length === 0) {
-      const f0 = this.currentCluster.clusterFaces.find(f => f.isFocus) || this.currentCluster.clusterFaces[0];
-      if (f0) {
+      const initFace = this.drawStartFace ||
+        (this.currentCluster && this.currentCluster.clusterFaces.find(f => f.faceIndex === spec.faceIndex)) ||
+        (this.currentCluster && this.currentCluster.clusterFaces[0]);
+      if (initFace) {
         const copy = {
           ...spec,
-          faceIndex: f0.faceIndex,
-          clusterToNet: f0.clusterToNet
+          faceIndex: initFace.faceIndex,
+          clusterToNet: initFace.clusterToNet
         };
-        if (!this.faceArtworks.has(f0.faceIndex)) {
-          this.faceArtworks.set(f0.faceIndex, []);
+        if (!this.faceArtworks.has(initFace.faceIndex)) {
+          this.faceArtworks.set(initFace.faceIndex, []);
         }
-        this.faceArtworks.get(f0.faceIndex).push(copy);
-        addedPairs.push({ faceIndex: f0.faceIndex, spec: copy });
+        this.faceArtworks.get(initFace.faceIndex).push(copy);
+        addedPairs.push({ faceIndex: initFace.faceIndex, spec: copy });
       }
     }
 
