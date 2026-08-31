@@ -55,8 +55,6 @@ export class GraphicStudio {
     this.isPanning = false;
     this.panStart = { x: 0, y: 0 };
 
-    // Cluster expansion depth (default: 1 for immediate 1-hop neighbors)
-    this.clusterDepth = 1;
 
     // Drawing state
     this.isDrawing = false;
@@ -97,15 +95,6 @@ export class GraphicStudio {
           </div>
 
           <div class="header-right">
-            <label class="depth-select-label" title="Cluster Expansion Depth">
-              <span>Neighbor Depth:</span>
-              <select id="studio-depth-select" class="custom-select-sm">
-                <option value="1" selected>1-Hop (Adjacent)</option>
-                <option value="2">2-Hops</option>
-                <option value="3">3-Hops</option>
-                <option value="4">4-Hops</option>
-              </select>
-            </label>
             <button id="btn-studio-toggle-preview" class="btn btn-primary btn-sm" title="Toggle Live 3D Fold Preview">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
@@ -488,13 +477,6 @@ export class GraphicStudio {
       stampSelect.addEventListener('change', (e) => { this.activeStamp = e.target.value; });
     }
 
-    const depthSelect = this.container.querySelector('#studio-depth-select');
-    if (depthSelect) {
-      depthSelect.addEventListener('change', (e) => {
-        this.clusterDepth = parseInt(e.target.value, 10) || 4;
-        this.updateClusterView();
-      });
-    }
 
     const gridToggleBtn = this.container.querySelector('#btn-studio-toggle-grid');
     if (gridToggleBtn) {
@@ -984,7 +966,6 @@ export class GraphicStudio {
   updateClusterView() {
     if (!this.foldData) return;
 
-    const depth = this.clusterDepth || 4;
     let alignMatrix = null;
     if (this.assemblyManager && this.assemblyManager.parts && this.assemblyManager.parts[this.currentPartIndex]) {
       alignMatrix = this.assemblyManager.parts[this.currentPartIndex].alignMatrix;
@@ -994,7 +975,7 @@ export class GraphicStudio {
       this.focusFaceIndex,
       this.foldData,
       this.faceAdjacency3D,
-      depth,
+      Infinity,
       this.kinematics,
       alignMatrix,
       this.lastCameraUp

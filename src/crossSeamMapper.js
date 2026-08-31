@@ -118,18 +118,20 @@ export class CrossSeamMapper {
   }
 
   /**
-   * Builds the local 2D cluster layout for a given focus face F0.
-   * Focus face F0 is placed centered at (0, 0) and oriented to match its 3D folded upright orientation
-   * snapped to the closest 90-degree angle.
+   * Builds the local 2D cluster layout for a given focus face F0 using a Priority-Queue
+   * 3-Tier Unfolding Engine:
    * 
-   * [CO-PLANAR ISLAND + CARDINAL RAYS UNPACKING]:
-   * 1. Tier 1 (Co-Planar Island): Expands in ALL directions across connected 3D co-planar
-   *    adjacent faces (fold angle = 0°, normal dot product ≈ 1.0) without distortion or false adjacency.
-   * 2. Tier 2 (Cardinal Rays): From the perimeter edges of the co-planar island, straight cardinal
-   *    rays expand "onwards and upwards" across 3D hinges up to `maxDepth`.
-   * 3. Prevents lateral overlap/ambiguity while showing full flat segmented face assemblies.
+   * [3-TIER UNPACKING HIERARCHY]:
+   * - Tier 1: Co-Planar Island — All 3D adjacent & co-planar faces (normal dot product ≈ 1.0)
+   *   drain first with top priority (priority < 100), forming the unified central panel.
+   * - Tier 2: Cardinal Non-Co-Planar Rays — Faces radiating directly from Tier 1 outer perimeter edges,
+   *   plus their straight-ahead directional continuations (priority 100..199).
+   * - Tier 3: Lateral Non-Co-Planar Flaps — Side, diagonal, or corner flaps branching off Tier 2 (priority >= 200).
+   * 
+   * Post-folding cut seams and creases have equal standing as physical 3D contact edges.
+   * Higher priority faces claim 2D space first; colliding lower priority branches are cleanly pruned.
    */
-  static buildNeighborCluster(focusFaceIdx, foldData, faceAdjacency3D, maxDepth = 4, kinematics = null, alignMatrix = null, cameraUp = null) {
+  static buildNeighborCluster(focusFaceIdx, foldData, faceAdjacency3D, maxDepth = Infinity, kinematics = null, alignMatrix = null, cameraUp = null) {
     const origCoords = foldData.vertices;
     const focusFaceVerts2D = foldData.facesVertices[focusFaceIdx];
 
@@ -152,9 +154,6 @@ export class CrossSeamMapper {
       const pv = new THREE.Vector3(cx, cy + 1, 0).applyMatrix4(worldMat).sub(p0).normalize();
       const pn = new THREE.Vector3().crossVectors(pu, pv).normalize();
 
-      // Target 3D Up vector:
-      // If cameraUp is provided (from clicked viewport), use apparent viewport up direction;
-      // otherwise fallback to canonical 3D up (+Y for vertical, -Z for horizontal).
       let targetUp;
       if (cameraUp) {
         targetUp = cameraUp;
@@ -166,7 +165,6 @@ export class CrossSeamMapper {
 
       const uProj = targetUp.dot(pu);
       const vProj = targetUp.dot(pv);
-      // Angle required to rotate the targetUp direction (uProj, vProj) to point UP (0, 1) on the 2D canvas:
       const targetAngle = Math.PI / 2 - Math.atan2(vProj, uProj);
       const k = Math.round(targetAngle / (Math.PI / 2));
       snapAngle = k * (Math.PI / 2);
@@ -176,8 +174,6 @@ export class CrossSeamMapper {
     const sinA = Math.round(Math.sin(snapAngle));
 
     // Centered & 90-deg rotated F0 local coordinates:
-    // px' = cosA * (x - cx) - sinA * (y - cy)
-    // py' = sinA * (x - cx) + cosA * (y - cy)
     const localF0 = f0Coords2D.map(p => {
       const px = p[0] - cx;
       const py = p[1] - cy;
@@ -190,13 +186,12 @@ export class CrossSeamMapper {
     const clusterFaces = [];
     const clusterEdges = [];
 
-    // Visited map: faceIndex -> { branchId, depth, isCoPlanarWithFocus }
+    // Visited map: faceIndex -> { branchId, depth, tier }
     const visitedFaces = new Map();
-    const queue = [];
     let branchCounter = 0;
 
-    visitedFaces.set(focusFaceIdx, { branchId: -1, depth: 0, isCoPlanarWithFocus: true });
-
+    // Place Focus Face F0 (Tier 1, Depth 0)
+    visitedFaces.set(focusFaceIdx, { branchId: -1, depth: 0, tier: 1 });
     clusterFaces.push({
       faceIndex: focusFaceIdx,
       isFocus: true,
@@ -204,13 +199,21 @@ export class CrossSeamMapper {
       origPolygon2D: f0Coords2D,
       branchId: -1,
       depth: 0,
+      tier: 1,
       isCoPlanarWithFocus: true,
       transformToNet: { tx: cx, ty: cy, rot: -snapAngle, scale: 1 },
       clusterToNet: CrossSeamMapper.computeRigidAffine(localF0, f0Coords2D),
       netToCluster: CrossSeamMapper.computeRigidAffine(f0Coords2D, localF0)
     });
 
-    // Seed the BFS queue with all edges of focus face F0 (initiating Cardinal Branches 0..N-1)
+    // Priority Queue for best-first unpacking
+    const pq = [];
+    const pushPQ = (item) => {
+      pq.push(item);
+      pq.sort((a, b) => a.priority - b.priority);
+    };
+
+    // Seed Priority Queue with all 3D neighbors of focus face F0
     const f0Verts2D = foldData.facesVertices[focusFaceIdx];
     const f0Len = f0Verts2D.length;
     const f0Neighbors = faceAdjacency3D[focusFaceIdx] || [];
@@ -229,62 +232,45 @@ export class CrossSeamMapper {
 
       if (neighborEntry) {
         const nFaceIdx = neighborEntry.neighborFace;
+        const nFaceVerts2D = foldData.facesVertices[nFaceIdx];
+        const nOrigCoords = nFaceVerts2D.map(vIdx => origCoords[vIdx]);
+        const isOpposite = neighborEntry.isOpposite !== undefined ? neighborEntry.isOpposite : true;
 
-        clusterEdges.push({
-          edgeIndex: i,
+        const nLocalPolygon = this.alignNeighborFaceToEdge(
+          nOrigCoords,
+          neighborEntry.neighborEdgeIndex,
+          p1Local,
+          p2Local,
+          isOpposite
+        );
+
+        const outNormal = this.computeOutwardNormal2D(localF0, i);
+        const isCoPlanar = !!neighborEntry.isCoPlanar;
+        const tier = isCoPlanar ? 1 : 2;
+        const priority = isCoPlanar ? (0.0 + 1 * 0.1) : (100.0 + 1 * 10);
+        const branchId = branchCounter++;
+        const rayDir = isCoPlanar ? null : outNormal;
+
+        pushPQ({
+          faceIndex: nFaceIdx,
+          localPolygon: nLocalPolygon,
+          origPolygon2D: nOrigCoords,
+          sharedEdgeIndex: i,
+          entryEdgeIndex: neighborEntry.neighborEdgeIndex,
           v1,
           v2,
           p1: p1Local,
           p2: p2Local,
           isFoldHinge,
           assignment: assign,
-          hasNeighbor: true,
-          neighborFace: nFaceIdx
+          tier,
+          depth: 1,
+          branchId,
+          rayDir,
+          priority
         });
-
-        if (!visitedFaces.has(nFaceIdx) && maxDepth >= 1) {
-          const nFaceVerts2D = foldData.facesVertices[nFaceIdx];
-          const nOrigCoords = nFaceVerts2D.map(vIdx => origCoords[vIdx]);
-          const isOpposite = neighborEntry.isOpposite !== undefined ? neighborEntry.isOpposite : true;
-
-          const nLocalPolygon = this.alignNeighborFaceToEdge(
-            nOrigCoords,
-            neighborEntry.neighborEdgeIndex,
-            p1Local,
-            p2Local,
-            isOpposite
-          );
-
-          if (CrossSeamMapper.checkPolygonOverlap(nLocalPolygon, clusterFaces)) {
-            continue;
-          }
-
-          const branchId = branchCounter++;
-          visitedFaces.set(nFaceIdx, { branchId, depth: 1, isCoPlanarWithFocus: neighborEntry.isCoPlanar });
-
-          clusterFaces.push({
-            faceIndex: nFaceIdx,
-            isFocus: false,
-            polygon: nLocalPolygon,
-            origPolygon2D: nOrigCoords,
-            sharedEdgeIndex: i,
-            branchId,
-            depth: 1,
-            isCoPlanarWithFocus: neighborEntry.isCoPlanar,
-            isFoldHinge,
-            clusterToNet: CrossSeamMapper.computeRigidAffine(nLocalPolygon, nOrigCoords),
-            netToCluster: CrossSeamMapper.computeRigidAffine(nOrigCoords, nLocalPolygon)
-          });
-
-          queue.push({
-            faceIndex: nFaceIdx,
-            localPolygon: nLocalPolygon,
-            entryEdgeIndex: neighborEntry.neighborEdgeIndex,
-            branchId,
-            depth: 1
-          });
-        }
       } else {
+        // Boundary edge with no neighbor in 3D
         clusterEdges.push({
           edgeIndex: i,
           v1,
@@ -299,44 +285,69 @@ export class CrossSeamMapper {
       }
     }
 
-    // Propagate Breadth-First: Straight Ahead + Left Turns + Co-Planar expansion
-    while (queue.length > 0) {
-      const current = queue.shift();
+    // Process Priority Queue (Dijkstra / Best-First Unpacking)
+    while (pq.length > 0) {
+      const current = pq.shift();
+
+      if (visitedFaces.has(current.faceIndex)) {
+        continue; // Already placed by a higher-priority route
+      }
+
+      // Check 2D interior overlap against all already-placed faces
+      if (CrossSeamMapper.checkPolygonOverlap(current.localPolygon, clusterFaces)) {
+        continue; // Collision detected; prune lower-priority candidate
+      }
+
+      // Accept and place candidate face
+      visitedFaces.set(current.faceIndex, {
+        branchId: current.branchId,
+        depth: current.depth,
+        tier: current.tier
+      });
+
+      clusterEdges.push({
+        edgeIndex: current.sharedEdgeIndex,
+        v1: current.v1,
+        v2: current.v2,
+        p1: current.p1,
+        p2: current.p2,
+        isFoldHinge: current.isFoldHinge,
+        assignment: current.assignment,
+        hasNeighbor: true,
+        neighborFace: current.faceIndex
+      });
+
+      clusterFaces.push({
+        faceIndex: current.faceIndex,
+        isFocus: false,
+        polygon: current.localPolygon,
+        origPolygon2D: current.origPolygon2D,
+        sharedEdgeIndex: current.sharedEdgeIndex,
+        branchId: current.branchId,
+        depth: current.depth,
+        tier: current.tier,
+        isCoPlanarWithFocus: current.tier === 1,
+        isFoldHinge: current.isFoldHinge,
+        clusterToNet: CrossSeamMapper.computeRigidAffine(current.localPolygon, current.origPolygon2D),
+        netToCluster: CrossSeamMapper.computeRigidAffine(current.origPolygon2D, current.localPolygon)
+      });
+
       if (current.depth >= maxDepth) continue;
 
+      // Expand outward across remaining edges of this placed face
       const currFaceIdx = current.faceIndex;
       const currFaceVerts2D = foldData.facesVertices[currFaceIdx];
       const numVerts = currFaceVerts2D.length;
       const currNeighbors = faceAdjacency3D[currFaceIdx] || [];
 
-      // Determine valid exit edges for recursive expansion:
-      // 1. Straight ahead (opposite edge): (entry + Math.floor(N/2)) % N
-      // 2. Left turn: (entry + 1) % N (counter-clockwise relative to entry edge)
-      // 3. Any co-planar adjacent edge
-      const candidateEdgeIndices = new Set();
-      
-      const oppositeEdgeIdx = (current.entryEdgeIndex + Math.floor(numVerts / 2)) % numVerts;
-      candidateEdgeIndices.add(oppositeEdgeIdx);
-
-      // Left-turn edge relative to entry direction
-      const leftTurnEdgeIdx = (current.entryEdgeIndex + 1) % numVerts;
-      candidateEdgeIndices.add(leftTurnEdgeIdx);
-
-      // Co-planar adjacent edges
-      currNeighbors.forEach(n => {
-        if (n.isCoPlanar) {
-          candidateEdgeIndices.add(n.edgeIndexInFace);
-        }
-      });
-
-      for (const exitEdgeIdx of candidateEdgeIndices) {
+      for (let exitEdgeIdx = 0; exitEdgeIdx < numVerts; exitEdgeIdx++) {
         if (exitEdgeIdx === current.entryEdgeIndex) continue; // Don't turn back through entry edge
 
         const nextNeighborEntry = currNeighbors.find(n => n.edgeIndexInFace === exitEdgeIdx);
         if (!nextNeighborEntry) continue;
 
         const nextFaceIdx = nextNeighborEntry.neighborFace;
-        if (visitedFaces.has(nextFaceIdx)) continue; // Avoid duplicate / collision
+        if (visitedFaces.has(nextFaceIdx)) continue;
 
         const p1Local = current.localPolygon[exitEdgeIdx];
         const p2Local = current.localPolygon[(exitEdgeIdx + 1) % numVerts];
@@ -353,14 +364,6 @@ export class CrossSeamMapper {
           isOpposite
         );
 
-        // Geometrically check if placing this face causes planar overlap with any already-placed face
-        if (CrossSeamMapper.checkPolygonOverlap(nextLocalPolygon, clusterFaces)) {
-          continue;
-        }
-
-        const nextDepth = current.depth + 1;
-        visitedFaces.set(nextFaceIdx, { branchId: current.branchId, depth: nextDepth, isCoPlanarWithFocus: nextNeighborEntry.isCoPlanar });
-
         const v1 = currFaceVerts2D[exitEdgeIdx];
         const v2 = currFaceVerts2D[(exitEdgeIdx + 1) % numVerts];
         const key2D = `${Math.min(v1, v2)}-${Math.max(v1, v2)}`;
@@ -368,38 +371,73 @@ export class CrossSeamMapper {
         const assign = edgeIdx2D >= 0 ? (foldData.edgesAssignment[edgeIdx2D] || 'C') : 'C';
         const isFoldHinge = (assign === 'V' || assign === 'M' || assign === 'F');
 
-        clusterEdges.push({
-          edgeIndex: exitEdgeIdx,
+        const outNormal = this.computeOutwardNormal2D(current.localPolygon, exitEdgeIdx);
+        const nextDepth = current.depth + 1;
+
+        let nextTier = 3;
+        let nextPriority = 200.0;
+        let nextRayDir = outNormal;
+        let nextBranchId = current.branchId;
+
+        if (nextNeighborEntry.isCoPlanar) {
+          if (current.tier === 1) {
+            // Continues the Tier 1 Co-Planar Island
+            nextTier = 1;
+            nextPriority = 0.0 + nextDepth * 0.1;
+            nextRayDir = null;
+            nextBranchId = -1;
+          } else {
+            // Co-planar extension of a non-coplanar flap (keeps same tier and ray)
+            nextTier = current.tier;
+            nextPriority = current.priority + 10;
+            nextRayDir = current.rayDir;
+          }
+        } else {
+          // Non-coplanar transition
+          if (current.tier === 1) {
+            // New Cardinal Ray radiating directly off the Tier 1 perimeter
+            nextTier = 2;
+            nextPriority = 100.0 + nextDepth * 10;
+            nextRayDir = outNormal;
+            nextBranchId = branchCounter++;
+          } else {
+            // Continuation from an existing Tier 2 or 3 panel:
+            // Check alignment between exit edge normal and the incoming ray direction
+            const ray = current.rayDir || outNormal;
+            const alignment = outNormal[0] * ray[0] + outNormal[1] * ray[1];
+            const isStraightAhead = alignment > 0.4 || exitEdgeIdx === (current.entryEdgeIndex + Math.floor(numVerts / 2)) % numVerts;
+
+            if (isStraightAhead && current.tier === 2) {
+              // Straight-ahead cardinal extension
+              nextTier = 2;
+              nextPriority = 100.0 + nextDepth * 10 + Math.max(0, (1 - alignment) * 5);
+              nextRayDir = current.rayDir;
+            } else {
+              // Lateral / corner / side flap turn
+              nextTier = 3;
+              nextPriority = 200.0 + nextDepth * 10 + Math.max(0, (1 - alignment) * 20);
+              nextRayDir = outNormal;
+            }
+          }
+        }
+
+        pushPQ({
+          faceIndex: nextFaceIdx,
+          localPolygon: nextLocalPolygon,
+          origPolygon2D: nextOrigCoords,
+          sharedEdgeIndex: exitEdgeIdx,
+          entryEdgeIndex: nextNeighborEntry.neighborEdgeIndex,
           v1,
           v2,
           p1: p1Local,
           p2: p2Local,
           isFoldHinge,
           assignment: assign,
-          hasNeighbor: true,
-          neighborFace: nextFaceIdx
-        });
-
-        clusterFaces.push({
-          faceIndex: nextFaceIdx,
-          isFocus: false,
-          polygon: nextLocalPolygon,
-          origPolygon2D: nextOrigCoords,
-          sharedEdgeIndex: exitEdgeIdx,
-          branchId: current.branchId,
+          tier: nextTier,
           depth: nextDepth,
-          isCoPlanarWithFocus: nextNeighborEntry.isCoPlanar,
-          isFoldHinge,
-          clusterToNet: CrossSeamMapper.computeRigidAffine(nextLocalPolygon, nextOrigCoords),
-          netToCluster: CrossSeamMapper.computeRigidAffine(nextOrigCoords, nextLocalPolygon)
-        });
-
-        queue.push({
-          faceIndex: nextFaceIdx,
-          localPolygon: nextLocalPolygon,
-          entryEdgeIndex: nextNeighborEntry.neighborEdgeIndex,
-          branchId: current.branchId,
-          depth: nextDepth
+          branchId: nextBranchId,
+          rayDir: nextRayDir,
+          priority: nextPriority
         });
       }
     }
@@ -410,6 +448,36 @@ export class CrossSeamMapper {
       clusterEdges,
       center: [cx, cy]
     };
+  }
+
+  /**
+   * Computes the 2D outward unit normal vector for an edge of a polygon.
+   */
+  static computeOutwardNormal2D(poly, edgeIdx) {
+    const len = poly.length;
+    const p1 = poly[edgeIdx];
+    const p2 = poly[(edgeIdx + 1) % len];
+
+    const dx = p2[0] - p1[0];
+    const dy = p2[1] - p1[1];
+    const segLen = Math.hypot(dx, dy);
+    if (segLen < 1e-9) return [0, 1];
+
+    // Compute signed area to determine winding
+    let area = 0;
+    for (let i = 0; i < len; i++) {
+      const curr = poly[i];
+      const next = poly[(i + 1) % len];
+      area += (curr[0] * next[1] - next[0] * curr[1]);
+    }
+
+    // For CCW (area > 0), outward normal is [dy / len, -dx / len]
+    // For CW (area < 0), outward normal is [-dy / len, dx / len]
+    if (area >= 0) {
+      return [dy / segLen, -dx / segLen];
+    } else {
+      return [-dy / segLen, dx / segLen];
+    }
   }
 
   /**
@@ -521,23 +589,21 @@ export class CrossSeamMapper {
 
   /**
    * Checks if candidate 2D polygon overlaps with any existing placed face polygon (interior overlap).
-   * Tests whether the candidate polygon's centroid or inner test points lie strictly inside any existing face.
+   * Robustly distinguishes between abutting shared boundary edges vs interior area penetration.
    */
   static checkPolygonOverlap(candidatePoly, existingFaces) {
-    // Candidate centroid
     let ccx = 0, ccy = 0;
     candidatePoly.forEach(p => { ccx += p[0]; ccy += p[1]; });
     ccx /= candidatePoly.length;
     ccy /= candidatePoly.length;
 
-    // Candidate bounding box
     let cMinX = Infinity, cMaxX = -Infinity, cMinY = Infinity, cMaxY = -Infinity;
     candidatePoly.forEach(p => {
       cMinX = Math.min(cMinX, p[0]); cMaxX = Math.max(cMaxX, p[0]);
       cMinY = Math.min(cMinY, p[1]); cMaxY = Math.max(cMaxY, p[1]);
     });
-    const cWidth = cMaxX - cMinX;
-    const cHeight = cMaxY - cMinY;
+
+    const eps = 1e-4;
 
     for (const f of existingFaces) {
       const poly = f.polygon;
@@ -551,22 +617,44 @@ export class CrossSeamMapper {
       fcx /= poly.length;
       fcy /= poly.length;
 
-      // Check if centroids are practically coincident (overlapping faces)
-      const dCentroid = Math.hypot(ccx - fcx, ccy - fcy);
-      if (dCentroid < 0.25 * Math.min(cWidth, cHeight)) {
+      // 1. Fast AABB bounding box check
+      if (cMaxX <= fMinX + eps || cMinX >= fMaxX - eps ||
+          cMaxY <= fMinY + eps || cMinY >= fMaxY - eps) {
+        continue;
+      }
+
+      // 2. Coincident centroid check
+      const dCent = Math.hypot(ccx - fcx, ccy - fcy);
+      if (dCent < 0.05 * Math.min(cMaxX - cMinX, cMaxY - cMinY)) {
         return true;
       }
 
-      // Check if candidate centroid is inside existing face polygon
-      if (this.isPointInsidePoly([ccx, ccy], poly)) {
-        return true;
+      // 3. Shrunk interior test points from candidate to avoid false positives on abutting edges
+      // Sample candidate centroid and intermediate points towards vertices
+      const testPointsCand = [[ccx, ccy]];
+      candidatePoly.forEach(p => {
+        testPointsCand.push([ccx * 0.3 + p[0] * 0.7, ccy * 0.3 + p[1] * 0.7]);
+      });
+
+      for (const tp of testPointsCand) {
+        if (this.isPointInsidePoly(tp, poly)) {
+          return true;
+        }
       }
 
-      // Check if existing face centroid is inside candidate polygon
-      if (this.isPointInsidePoly([fcx, fcy], candidatePoly)) {
-        return true;
+      // 4. Shrunk interior test points from existing polygon inside candidate
+      const testPointsExisting = [[fcx, fcy]];
+      poly.forEach(p => {
+        testPointsExisting.push([fcx * 0.3 + p[0] * 0.7, fcy * 0.3 + p[1] * 0.7]);
+      });
+
+      for (const tp of testPointsExisting) {
+        if (this.isPointInsidePoly(tp, candidatePoly)) {
+          return true;
+        }
       }
     }
+
     return false;
   }
 
@@ -584,3 +672,4 @@ export class CrossSeamMapper {
     return inside;
   }
 }
+
