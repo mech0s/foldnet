@@ -6,6 +6,7 @@ import { CADParser } from './cadParser.js';
 import { NetUnfolder } from './netUnfolder.js';
 import { GraphicStudio } from './graphicStudio.js';
 import { AssemblyManager } from './assemblyManager.js';
+import { OnshapeService } from './onshapeService.js';
 
 class App {
   constructor() {
@@ -30,6 +31,7 @@ class App {
     });
 
     this.assemblyManager = new AssemblyManager();
+    this.onshapeService = new OnshapeService();
     this.foldData = null;
     this.kinematics = null;
     this.explodedProgress = 0.0;
@@ -202,6 +204,11 @@ class App {
       customOpt.value = 'custom';
       customOpt.textContent = 'Custom File...';
       modelSelect.appendChild(customOpt);
+
+      const onshapeOpt = document.createElement('option');
+      onshapeOpt.value = 'onshape';
+      onshapeOpt.textContent = '☁️ Onshape Cloud Document...';
+      modelSelect.appendChild(onshapeOpt);
 
       this.defaultModelUrl = defaultSelectedUrl;
     } catch (err) {
@@ -559,10 +566,20 @@ class App {
       const val = e.target.value;
       if (val === 'custom') {
         document.getElementById('file-input').click();
+      } else if (val === 'onshape') {
+        this.openOnshapeImport();
       } else {
         this.loadModelFromUrl(val);
       }
     });
+
+    // Onshape Cloud Import button
+    const btnOnshape = document.getElementById('btn-onshape-import');
+    if (btnOnshape) {
+      btnOnshape.addEventListener('click', () => {
+        this.openOnshapeImport();
+      });
+    }
 
     // File input handler
     const fileInput = document.getElementById('file-input');
@@ -985,6 +1002,57 @@ class App {
     } else {
       alert(`Unsupported file format: .${ext}`);
     }
+  }
+
+  async openOnshapeImport() {
+    this.onshapeService.openImportDialog(async (buffer, title, ext) => {
+      try {
+        const meshData = await CADParser.parseCADFile(buffer, ext);
+        const multiPlanar = CADParser.extractMultiBodyPlanarFaces(meshData);
+
+        this.currentCadSeed = 1;
+        this.currentCadPlanarData = { ...multiPlanar, title };
+
+        const modelSelect = document.getElementById('model-select');
+        if (modelSelect) {
+          let onshapeOpt = modelSelect.querySelector('option[data-onshape-active]');
+          if (!onshapeOpt) {
+            onshapeOpt = document.createElement('option');
+            onshapeOpt.setAttribute('data-onshape-active', 'true');
+            modelSelect.insertBefore(onshapeOpt, modelSelect.firstChild);
+          }
+          onshapeOpt.value = `onshape-${title}`;
+          onshapeOpt.textContent = `☁️ Onshape: ${title}`;
+          modelSelect.value = onshapeOpt.value;
+        }
+
+        if (multiPlanar.isAssembly) {
+          const assemblyPayload = NetUnfolder.unfoldAssemblyToFold(multiPlanar.components, this.currentCadSeed);
+          assemblyPayload.file_title = title;
+          this.assemblyManager.loadAssembly(assemblyPayload);
+          this.updateRegenButtonUI(true);
+          this.initAssemblyModel(this.assemblyManager);
+        } else {
+          const comp = multiPlanar.components[0];
+          const foldJson = NetUnfolder.unfoldToFoldJSON(comp.vertices, comp.facesVertices, this.currentCadSeed, 500, {
+            componentId: comp.id,
+            bbox: comp.bbox,
+            center: comp.center,
+            name: title
+          });
+          foldJson.file_title = title;
+          this.assemblyManager.loadAssembly(foldJson);
+          this.updateRegenButtonUI(true);
+          this.initAssemblyModel(this.assemblyManager);
+        }
+
+        const btnModeEditor = document.getElementById('btn-mode-editor');
+        if (btnModeEditor) btnModeEditor.click();
+      } catch (err) {
+        console.error('[Onshape] Error processing imported model:', err);
+        alert(`Failed to process Onshape model: ${err.message}`);
+      }
+    });
   }
 
   regenerateCadNet() {

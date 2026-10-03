@@ -67,6 +67,7 @@
               <option value="models/nested3.stl">Nested 3-Body Assembly (STL)</option>
             </optgroup>
             <option value="custom">Custom File...</option>
+            <option value="onshape">☁️ Onshape Cloud CAD...</option>
           </select>
         </div>
 
@@ -79,6 +80,15 @@
           <span>Open / Import</span>
           <input type="file" id="file-input" accept=".json,.fold,.obj,.stl,.step,.stp" hidden />
         </label>
+
+        <button id="btn-onshape-import" class="btn btn-secondary btn-onshape" title="Import CAD model directly from Onshape Cloud">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+            <polyline points="2 17 12 22 22 17"></polyline>
+            <polyline points="2 12 12 17 22 12"></polyline>
+          </svg>
+          <span>Onshape</span>
+        </button>
 
         <div class="control-group">
           <label for="theme-select">Theme:</label>
